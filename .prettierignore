@@ -12,5 +12,4 @@ packages/xml-parser-ts-codegen/src/schemas/xsd-incomplete--manually-written/HFP.
 packages/xml-parser-ts-codegen/src/schemas/xsd-incomplete--manually-written/XSD.xsd
 
 # @prettier/parser-xml shouldn't mess with auto-generated IntelliJ files
-_intellij-project
 *.iml

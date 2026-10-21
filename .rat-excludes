@@ -6,7 +6,6 @@
 .rat-excludes
 .rat-reports
 DISCLAIMER-WIP
-_intellij-project/maven-based-packages-@-kie-tools.iml
 devbox.lock
 dockerignore
 examples/kie-sandbox-commit-message-validation-service/go.mod

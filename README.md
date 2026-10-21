@@ -49,14 +49,7 @@ To build and test all packages on this repository, you're going to need:
 - pnpm `10.34.4` _(To install, follow these instructions: https://pnpm.io/installation#using-npm)_
 - Maven `3.9.16`
 - Java `17`
-- Go `1.26.7` _(To install, follow these instructions: https://go.dev/doc/install)_
-- Helm `3.13.3` _(To install, follow these instructions: https://helm.sh/docs/intro/install/)_
-- Make
 - bash `5.x` _(On Linux or Nix you should be fine. On macOS, follow these instructions to use zsh: https://support.apple.com/102360)_
-
-> **ℹ️ NOTE**
->
-> If you plan on building container images, make sure you have a working Docker or Podman setup. Setting `KIE_TOOLS_BUILD__buildContainerImages=true` will also be necessary. If using Podman, see ["Specifics # Container Images"](./repo/MANUAL.md#specifics--container-images) in the manual.
 
 #### Step 1: Bootstrap
 
@@ -112,8 +105,6 @@ Installs the necessary 3rd party dependencies and links packages of this reposit
 >
 > This repository's build is parameterized by several Environment Variables. For an extensive list of these variables, please see the list printed by the `bootstrap` step.
 >
-> - To enable Examples build: `export KIE_TOOLS_BUILD__buildExamples=true`
-> - To enable Container images build: `export KIE_TOOLS_BUILD__buildContainerImages=true`
 > - To enable E2E tests: `export KIE_TOOLS_BUILD__runEndToEndTests=true`
 
 > **ℹ️ NOTE**
@@ -122,7 +113,7 @@ Installs the necessary 3rd party dependencies and links packages of this reposit
 
 > **ℹ️ NOTE**
 >
-> Final artifacts will be in `{packages,examples}/*/dist` directories.
+> Final artifacts will be in `packages/*/dist` directories.
 
 > **ℹ️ NOTE**
 >
@@ -190,41 +181,14 @@ To use it follow the steps:
 
 ---
 
-## Applications
+## Running the editors
 
-This repository contains several applications. To develop each one of them individually, refer to the instructions below.
+After building (see above), the editors can be developed with Storybook. Storybook 7 fails to load `.storybook/main.ts` under Node's native TypeScript support, so on Node 22.18+/24 start it with `NODE_OPTIONS=--no-experimental-strip-types`.
 
-#### VS Code Extension (DMN, BPMN, SceSim, and PMML Editors)
+| Package                           | Command      | URL                     |
+| --------------------------------- | ------------ | ----------------------- |
+| `packages/dmn-editor`             | `pnpm start` | `http://localhost:9901` |
+| `packages/dmn-editor-standalone`  | `pnpm start` | `http://localhost:9903` |
+| `packages/bpmn-editor-standalone` | `pnpm start` | `http://localhost:9904` |
 
-1. After you've successfully built the project following the instructions above, open the `packages/kie-editors-dev-vscode-extension` folder on VS Code. Use a new VS Code window so that the `packages/kie-editors-dev-vscode-extension` folder shows up as root in the VS Code explorer.
-2. From there, you can Run the extension or the end-to-end tests by using the `Debug` menu/section. You can also use the respective shortcuts (F5 to start debugging, for instance).
-3. **NOTE:** To run the VS Code extension in development mode, you need `webpack` and `webpack-cli` to be globally installed on NPM. Normally you can do that with `npm install -g webpack@^5.94.0 webpack-cli@^4.10.0`, but `sudo` may be required depending on your installation.
-4. **Remember!** If you make changes to any package other than `packages/kie-editors-dev-vscode-extension`, you have to manually rebuild them before relaunching the extension on VS Code.
-
-#### Chrome Extension (DMN, BPMN, and SceSim Editors)
-
-1. After you've successfully built the project following the instructions above, open the `packages/chrome-extension-pack-kogito-kie-editors` folder on your favourite IDE. You can import the entire repo as well if you want to make changes to other packages.
-2. Run `pnpm build:dev` on `packages/chrome-extension-pack-kogito-kie-editors`. This will create a version of the Chrome Extension that fetches the envelope locally.
-3. Open a terminal and run `pnpm start` on `packages/chrome-extension-pack-kogito-kie-editors`. This will start a `webpack serve` instance with the editors and their envelope. We use that because we don't pack the Chrome Extension bundle with the editors inside. Instead, we fetch them from GitHub pages.
-4. You also have to enable invalid certificates for resources loaded from localhost in your browser. To do that, go to `chrome://flags/#temporary-unexpire-flags-m118` in your Chrome browser, enable this flag and restart browser. Then go to `chrome://flags/#allow-insecure-localhost` in your Chrome browser and enable also this flag. Alternativelly, you can go to `https://localhost:9001` and add an exception.
-5. Open Chrome and go to `chrome://extensions`. Enable "Developer mode" in the top-right corner and click on "Load unpacked". Choose the `packages/chrome-extension-pack-kogito-kie-editors/dist` folder.
-6. From now on you can use the development version of the extension. **Remember!** After each change, you have to rebuild the changed modules and hit the "Refresh" button of the extension card.
-
-#### KIE Sandbox
-
-1. After you've successfully built the project following the instructions above, go to `packages/online-editor`.
-2. Open a terminal and run `pnpm start`. This will start a `webpack serve` instance with the Online Editor resources.
-3. From now on you can use the development version of the Online Editor by accessing `https://localhost:9001`.
-4. Run the CORS Proxy by running `pnpm start` at `packages/cors-proxy`.
-
-#### Standalone Editors (DMN)
-
-1. After you've successfully built the project following the instructions above, go to `packages/dmn-editor-standalone`.
-2. Open a terminal and run `pnpm start`. This will start a `webpack serve` instance with the Standalone Editors test page.
-3. From now on you can use the Standalone DMN Editor by accessing `http://localhost:9903`.
-
-#### Standalone Editors (BPMN)
-
-1. After you've successfully built the project following the instructions above, go to `packages/bpmn-editor-standalone`.
-2. Open a terminal and run `pnpm start`. This will start a `webpack serve` instance with the Standalone Editors test page.
-3. From now on you can use the Standalone BPMN Editor by accessing `http://localhost:9904`.
+Run the command from inside the package directory. Ports come from `build-env <package>.storybook.port`; the standalone `pnpm start` also rebuilds on changes.
