@@ -1,6 +1,5 @@
 packages:
   - "packages/*"
-  - "examples/*"
   - "scripts/*"
 overrides:
   # CVE-2026-15195: Prototype pollution in Pointer.set. Fixed in 15.3.6.
