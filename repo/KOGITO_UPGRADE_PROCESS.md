@@ -58,7 +58,6 @@ The following prerequisites must be assessed before beginning the procedure:
 The Quarkus version is present in the following file categories:
 
 - `root-env/env/index.js` file
-- go test files
 
 The best (and fastest) way to catch all the Quarkus versions is to perform a search a grep (or the IDE integrated search) and replace it with the new version. So, as a key, you can use:
 
@@ -75,10 +74,7 @@ To upgrade Java and Maven versions, you should first identify all the Java modul
 In detail, the involved module's categories are:
 
 - Jenkins and GitHub actions configuration files;
-- GWT based modules;
-- Images generation modules;
-- Quarkus-based application (E.g., extended-services-java)
-- Java application (E.g., vscode-java-code-completion-extension-plugin-core)
+- Maven-based modules (E.g., `dmn-testing-models`)
 - JBang scripts (E.g., dmn-marshaller tests)
 
 The suggested strategy is to check all:
@@ -101,13 +97,3 @@ Of course, new Java and Maven versions may lead to incompatibilities in the code
 Don't forget to update the Java and Maven versions in this file `repo/build-dependencies-versions.json` and the `README.md` (root and submodules) as well.
 
 You can find an example of the Java / Maven versions upgrade in [this PR](https://github.com/apache/incubator-kie-tools/pull/2182)
-
-## Upgrading GraphQL schemas in `@kie-tools/runtime-tools-process-gateway-api` & `@kie-tools/runtime-tools-swf-gateway-api`
-
-The following commands will help to sync up the gateway apis the GraphQL schema with the new Kogito Data Index GraphQL schema:
-
-- Start a blank Data Index Container, for example `docker run -p8180:8080 docker.io/apache/incubator-kie-kogito-data-index-ephemeral:{$KOGITO_VERSION}`
-- Run `pnpm -F @kie-tools/runtime-tools-process-gateway-api graphql:codegen`
-- Run `pnpm -F @kie-tools/runtime-tools-swf-gateway-api graphql:codegen`
-
-After upgrading the GraphQL schemas it is recommended to verify that the incoming changes aren't breaking the consoles or devui's and fix any possible conflict if needed.

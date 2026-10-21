@@ -103,8 +103,6 @@ pipeline {
                             export KIE_TOOLS_BUILD__runLinters=true
                             export KIE_TOOLS_BUILD__runTests=true
                             export KIE_TOOLS_BUILD__runEndToEndTests=true
-                            export KIE_TOOLS_BUILD__buildContainerImages=true
-                            export KIE_TOOLS_BUILD__buildExamples=true
                             export KIE_TOOLS_BUILD__ignoreTestFailures=false
                             export KIE_TOOLS_BUILD__ignoreEndToEndTestFailures=false
                             export START_SERVER_AND_TEST_INSECURE=true

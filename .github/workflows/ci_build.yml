@@ -130,8 +130,6 @@ jobs:
           KIE_TOOLS_BUILD__runTests: "true"
           KIE_TOOLS_BUILD__runEndToEndTests: ${{ runner.os == 'Linux' }}
           KIE_TOOLS_BUILD__containerizedEndToEndTests: ${{ runner.os == 'Linux' }}
-          KIE_TOOLS_BUILD__buildContainerImages: ${{ runner.os == 'Linux' }}
-          KIE_TOOLS_BUILD__buildExamples: "true"
           KIE_TOOLS_BUILD__ignoreTestFailures: ${{ !github.event.pull_request }}
           KIE_TOOLS_BUILD__ignoreEndToEndTestFailures: ${{ !github.event.pull_request }}
           PLAYWRIGHT_BASE__enableChromiumProject: "true"
@@ -153,8 +151,6 @@ jobs:
         if: steps.setup_build_mode.outputs.mode == 'partial' && steps.setup_build_mode.outputs.upstreamPnpmFilterString != ''
         shell: bash
         env:
-          KIE_TOOLS_BUILD__buildContainerImages: ${{ runner.os == 'Linux' }}
-          KIE_TOOLS_BUILD__buildExamples: "true"
           NODE_OPTIONS: "--max_old_space_size=6144"
           MAVEN_ARGS: "-B -Puse-maven-repo-local-tail"
           MAVEN_OPTS: "-Xmx2g"
@@ -169,8 +165,6 @@ jobs:
           KIE_TOOLS_BUILD__runLinters: "true"
           KIE_TOOLS_BUILD__runTests: "true"
           KIE_TOOLS_BUILD__runEndToEndTests: ${{ runner.os == 'Linux' }}
-          KIE_TOOLS_BUILD__buildContainerImages: ${{ runner.os == 'Linux' }}
-          KIE_TOOLS_BUILD__buildExamples: "true"
           PLAYWRIGHT_BASE__enableChromiumProject: "true"
           PLAYWRIGHT_BASE__enableGoogleChromeProject: "true"
           PLAYWRIGHT_BASE__enableWebkitProject: "true"

@@ -99,28 +99,12 @@ RUN curl -s "https://get.sdkman.io" | bash && \
     sudo update-alternatives --install /usr/local/bin/mvn mvn $(which mvn) 1 && \
     sdk flush
 
-# Golang setup
-RUN wget https://go.dev/dl/go1.26.7.linux-amd64.tar.gz -P /tmp && \
-    sudo tar xzf /tmp/go1.26.7.linux-amd64.tar.gz -C /opt && rm /tmp/go1.26.7.linux-amd64.tar.gz && \
-    echo 'export GOPATH=${HOME}/go' | sudo tee /etc/profile.d/go.sh && \
-    echo 'export PATH=${PATH}:/opt/go/bin:${GOPATH}/bin' | sudo tee -a /etc/profile.d/go.sh && \
-    echo "source /etc/profile.d/go.sh" >> $HOME/.bashrc && \
-    sudo update-alternatives --install /usr/local/bin/go go /opt/go/bin/go 1
-
 # CodeQL setup
 RUN wget https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz -P /tmp && \
     sudo tar xzf /tmp/codeql-bundle-linux64.tar.gz -C /opt && rm /tmp/codeql-bundle-linux64.tar.gz && \
     sudo chown -R nonrootuser:nonrootuser /opt/codeql && \
     echo 'export PATH=/opt/codeql:${PATH}' | sudo tee -a /etc/profile.d/codeql.sh && \
     echo "source /etc/profile.d/codeql.sh" >> $HOME/.bashrc
-
-# Openshift client setup
-RUN wget https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz -P /tmp && \
-    sudo tar -C /usr/bin/ -xvzf /tmp/openshift-client-linux.tar.gz oc && rm /tmp/openshift-client-linux.tar.gz
-
-# Helm CLI setup
-RUN wget https://get.helm.sh/helm-v3.15.2-linux-amd64.tar.gz -P /tmp && \
-    sudo tar -C /usr/bin/ -zxvf /tmp/helm-v3.15.2-linux-amd64.tar.gz linux-amd64/helm --strip-components 1 && rm /tmp/helm-v3.15.2-linux-amd64.tar.gz
 
 # Env vars
 ENV HOME="/home/nonrootuser"
@@ -129,9 +113,6 @@ ENV MAVEN_HOME="${HOME}/.sdkman/candidates/maven/current/"
 ENV NODE_HOME="${HOME}/.nvm/versions/node/v24.21.0"
 ENV DISPLAY=":99"
 ENV NODE_OPTIONS="--max_old_space_size=6144"
-ENV GOPATH="${HOME}/go"
-ENV GOROOT="/opt/go"
-ENV PATH="${PATH}:${GOROOT}/bin:${GOPATH}/bin"
 
 ENTRYPOINT [""]
 
