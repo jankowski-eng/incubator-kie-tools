@@ -22,10 +22,10 @@ pipeline {
     }
 
     environment {
-        TESTS_REPORTS_PATTERNS = 'kie-tools/packages/**/dist-tests/junit-report*.xml kie-tools/examples/**/dist-tests/junit-report*.xml kie-tools/packages/**/target/surefire-reports/TEST-*.xml kie-tools/examples/**/target/surefire-reports/TEST-*.xml'
-        END_TO_END_TESTS_REPORTS_PATTERNS = 'kie-tools/packages/**/dist-tests-e2e/junit-report*.xml kie-tools/examples/**/dist-tests-e2e/junit-report*.xml kie-tools/packages/**/target/failsafe-reports/TEST-*.xml kie-tools/examples/**/target/failsafe-reports/TEST-*.xml'
-        END_TO_END_TESTS_ARTIFACTS_PATTERNS = 'kie-tools/packages/**/dist-tests-e2e kie-tools/examples/**/dist-tests-e2e'
-        BUILD_ARTIFACTS_PATTERNS = 'kie-tools/packages/**/dist kie-tools/examples/**/dist'
+        TESTS_REPORTS_PATTERNS = 'kie-tools/packages/**/dist-tests/junit-report*.xml kie-tools/packages/**/target/surefire-reports/TEST-*.xml'
+        END_TO_END_TESTS_REPORTS_PATTERNS = 'kie-tools/packages/**/dist-tests-e2e/junit-report*.xml kie-tools/packages/**/target/failsafe-reports/TEST-*.xml'
+        END_TO_END_TESTS_ARTIFACTS_PATTERNS = 'kie-tools/packages/**/dist-tests-e2e'
+        BUILD_ARTIFACTS_PATTERNS = 'kie-tools/packages/**/dist'
         ENABLE_BUILDKITE = 'false'
     }
 

@@ -26,11 +26,10 @@ export const __ROOT_PKG_NAME = "kie-tools-root";
  * Root paths that can be ignored when checking individual changed files.
  *
  * `packages/` for the kie-tools packages, analysed by `turbo ls`.
- * `examples/` for the kie-tools examples, analysed by `turbo ls`.
  * `repo/` for the dependency graph. No PR should update the repository dependency graph by itself.
  * `pnpm-lock.yaml` is the lockfile for the repository dependencies, also analysed by `turbo ls`.
  */
-export const __PACKAGES_ROOT_PATHS = ["packages/", "examples/", "repo/", "pnpm-lock.yaml"];
+export const __PACKAGES_ROOT_PATHS = ["packages/", "repo/", "pnpm-lock.yaml"];
 
 export const __NON_SOURCE_FILES_PATTERNS = stdoutArray(
   fs.readFileSync(path.resolve(__dirname, "../patterns/non-source-files-patterns.txt"), "utf-8")

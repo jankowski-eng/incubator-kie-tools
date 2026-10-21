@@ -76,11 +76,6 @@ runs:
         java-version: 17
         distribution: "temurin"
 
-    - name: "Set up GOLANG 1.26.7"
-      uses: actions/setup-go@v5
-      with:
-        go-version: "1.26.7"
-
     - name: "Set up Maven"
       uses: stCarolas/setup-maven@v5
       with:
@@ -132,16 +127,6 @@ runs:
     #     echo "version<<$EOF" >> "$GITHUB_OUTPUT"
     #     colima version >> "$GITHUB_OUTPUT"
     #     echo "$EOF" >> "$GITHUB_OUTPUT"
-
-    - name: "Setup Helm (Ubuntu)"
-      if: runner.os == 'Linux'
-      shell: bash
-      env:
-        HELM_VERSION: "v3.13.3"
-      run: |
-        echo "STEP: Install Helm (Ubuntu only)"
-        sudo wget -q https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz -O - | tar -xzO linux-amd64/helm > /usr/local/bin/helm
-        sudo chmod +x /usr/local/bin/helm
 
     - name: "Setup network timeout"
       shell: bash
