@@ -64,7 +64,11 @@ ok("undo enabled after drag", !(await page.locator("[data-click=undo]").isDisabl
 await page.locator("[data-click=undo]").click();
 await settle(500);
 const b2 = await page.locator('#scene g[data-id="front"]').boundingBox();
-ok("undo restores position", Math.round(b2.x - b0.x) === 0 && Math.round(b2.y - b0.y) === 0);
+ok(
+  "undo restores position",
+  Math.round(b2.x - b0.x) === 0 && Math.round(b2.y - b0.y) === 0,
+  `dx=${(b2.x - b0.x).toFixed(1)} dy=${(b2.y - b0.y).toFixed(1)} viewBox=${await page.locator("#drd").getAttribute("viewBox")}`
+);
 ok("redo works", (await page.locator("[data-click=redo]").isDisabled()) === false);
 await page.locator("[data-click=redo]").click();
 await settle(400);

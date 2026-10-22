@@ -6,7 +6,7 @@ defmodule DmnSpike.Editor do
   """
   use GenServer
 
-  alias DmnSpike.{Autocomplete, Dmn, Eval, Fmt, Layout, Model, Panel, Svg, Types, TypesPanel}
+  alias DmnSpike.{Autocomplete, Dmn, Eval, Fmt, Layout, Model, Panel, Svg, Types, TypesPanel, View}
   alias Popcorn.JS
 
   @name :editor
@@ -42,16 +42,25 @@ defmodule DmnSpike.Editor do
     const svg = $('#drd'), pt = svg.createSVGPoint();
     const at = (e) => { pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); };
 
-    // diagram: drag nodes, connect from a node's handle, select edges
-    let mode = null;
+    // diagram: drag nodes, connect from a node's handle, select edges, pan on the background, wheel to zoom
+    let mode = null, last = null;
+    const scale = () => svg.getScreenCTM().a; // screen px per SVG unit
+    svg.addEventListener('wheel', (e) => { e.preventDefault(); const p = at(e); ed({t: 'zoom', f: Math.exp(e.deltaY * 0.0015), x: p.x, y: p.y}); }, {passive: false});
     svg.addEventListener('pointerdown', (e) => {
       const h = e.target.closest('[data-handle]'), g = e.target.closest('[data-id]'), l = e.target.closest('[data-edge]');
       if (h) { mode = 'connect'; svg.setPointerCapture(e.pointerId); ed({t: 'cstart', id: h.dataset.handle}); }
       else if (g) { mode = 'drag'; svg.setPointerCapture(e.pointerId); const p = at(e); ed({t: 'down', id: g.dataset.id, x: p.x, y: p.y}); }
       else if (l) ed({t: 'edge', i: Number(l.dataset.edge)});
+      else { mode = 'pan'; last = {x: e.clientX, y: e.clientY}; svg.setPointerCapture(e.pointerId); }
     });
     svg.addEventListener('pointermove', (e) => {
       if (!mode) return;
+      if (mode === 'pan') {
+        const s = scale();
+        ed({t: 'pan', dx: -(e.clientX - last.x) / s, dy: -(e.clientY - last.y) / s});
+        last = {x: e.clientX, y: e.clientY};
+        return;
+      }
       const p = at(e);
       ed({t: mode === 'drag' ? 'move' : 'cmove', x: p.x, y: p.y});
     });
@@ -147,7 +156,7 @@ defmodule DmnSpike.Editor do
   def init(_) do
     state = %{
       model: Model.sample(), past: [], future: [], selected: "front", sel_edge: nil,
-      drag: nil, group: nil, connect: nil, tab: "editor", report: nil, name: "Popcorn spike", upload: nil
+      drag: nil, group: nil, connect: nil, tab: "editor", report: nil, name: "Popcorn spike", upload: nil, view: nil
     }
 
     {:ok, state, {:continue, :setup}}
@@ -198,8 +207,25 @@ defmodule DmnSpike.Editor do
   end
 
   defp event(%{"t" => "up"}, state) do
-    patch([["attr", "#drd", "viewBox", Svg.viewbox(state.model)]])
+    patch([["attr", "#drd", "viewBox", viewbox(state)]])
     %{state | drag: nil}
+  end
+
+  defp event(%{"t" => "pan", "dx" => dx, "dy" => dy}, state), do: set_view(state, View.pan(current_view(state), dx, dy))
+
+  defp event(%{"t" => "zoom", "f" => f, "x" => x, "y" => y}, state),
+    do: set_view(state, View.zoom(current_view(state), f, x, y))
+
+  defp event(%{"t" => "click", "what" => w}, state) when w in ["zoom-in", "zoom-out"] do
+    v = current_view(state)
+    {cx, cy} = View.center(v)
+    set_view(state, View.zoom(v, if(w == "zoom-in", do: 0.8, else: 1.25), cx, cy))
+  end
+
+  defp event(%{"t" => "click", "what" => "fit"}, state) do
+    state = %{state | view: nil}
+    patch([["attr", "#drd", "viewBox", viewbox(state)]])
+    state
   end
 
   defp event(%{"t" => "cstart", "id" => id}, state), do: %{state | connect: id}
@@ -534,6 +560,17 @@ defmodule DmnSpike.Editor do
     node_ops ++ shown ++ table ++ [["html", "#status", "evaluated #{n} cells in #{Float.round(us / 1000, 1)} ms"]] ++ history_ops(state)
   end
 
+  defp current_view(%{view: nil, model: m}), do: View.parse(Svg.viewbox(m))
+  defp current_view(%{view: v}), do: v
+
+  defp viewbox(%{view: nil, model: m}), do: Svg.viewbox(m)
+  defp viewbox(%{view: v}), do: View.to_string(v)
+
+  defp set_view(state, v) do
+    patch([["attr", "#drd", "viewBox", View.to_string(v)]])
+    %{state | view: v}
+  end
+
   defp xml_ops(%{tab: "xml"} = state), do: [["html", "#xml", Fmt.esc(Dmn.to_xml(state.model, state.name))]]
   defp xml_ops(_state), do: []
 
@@ -566,7 +603,7 @@ defmodule DmnSpike.Editor do
 
     patch(
       [
-        ["attr", "#drd", "viewBox", Svg.viewbox(state.model)],
+        ["attr", "#drd", "viewBox", viewbox(state)],
         ["html", "#scene", Svg.scene(state.model, results, state.selected, state.sel_edge)],
         ["html", "#panel", Panel.render(state.model, state.selected, results)],
         ["html", "#types", TypesPanel.render(state.model)],

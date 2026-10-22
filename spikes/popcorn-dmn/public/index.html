@@ -435,6 +435,34 @@
           monospace;
         max-height: 75vh;
       }
+      .canvas {
+        position: relative;
+      }
+      .zoomctl {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 2;
+        display: flex;
+        gap: 2px;
+      }
+      .zoomctl button {
+        min-width: 1.9rem;
+        padding: 0.15rem 0.45rem;
+      }
+      svg#drd {
+        cursor: grab;
+      }
+      header {
+        flex-wrap: wrap;
+        row-gap: 0.4rem;
+      }
+      header #status {
+        flex: 1 1 14rem;
+        min-width: 0;
+        text-align: right;
+        margin-left: auto;
+      }
     </style>
   </head>
   <body>
@@ -463,6 +491,11 @@
             >Drag onto the canvas. Drag a selected node's top handle onto another node to connect. Delete removes the
             selection.</small
           >
+        </div>
+        <div class="zoomctl">
+          <button data-click="zoom-in" title="Zoom in">+</button
+          ><button data-click="zoom-out" title="Zoom out">−</button
+          ><button data-click="fit" title="Fit diagram">Fit</button>
         </div>
         <svg id="drd" viewBox="0 0 820 370">
           <defs>

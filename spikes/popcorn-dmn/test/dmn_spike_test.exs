@@ -290,4 +290,27 @@ defmodule DmnSpikeTest do
       assert m2.nodes["dti"].expr.result == ~s|"a<b & c>d"|
     end
   end
+
+  describe "pan and zoom" do
+    alias DmnSpike.View
+
+    test "zoom keeps the point under the cursor fixed" do
+      {x, y, w, h} = v = {0.0, 0.0, 800.0, 400.0}
+      {nx, ny, nw, nh} = View.zoom(v, 0.5, 200.0, 100.0)
+      assert {nw, nh} == {400.0, 200.0}
+      # the cursor point maps to the same fraction of the view before and after
+      assert (200.0 - x) / w == (200.0 - nx) / nw and (100.0 - y) / h == (100.0 - ny) / nh
+    end
+
+    test "zoom is clamped and pan moves the origin" do
+      assert {_, _, 80.0, _} = View.zoom({0.0, 0.0, 100.0, 50.0}, 0.01, 0.0, 0.0)
+      assert {_, _, 200_000.0, _} = View.zoom({0.0, 0.0, 100.0, 50.0}, 1.0e9, 0.0, 0.0)
+      assert View.pan({10.0, 20.0, 100.0, 50.0}, -5.0, 7.0) == {5.0, 27.0, 100.0, 50.0}
+    end
+
+    test "string round trip" do
+      assert View.to_string({1.0, -2.5, 820.0, 370.0}) == "1.0 -2.5 820.0 370.0"
+      assert View.parse("0 -30 820 400") == {0.0, -30.0, 820.0, 400.0}
+    end
+  end
 end
