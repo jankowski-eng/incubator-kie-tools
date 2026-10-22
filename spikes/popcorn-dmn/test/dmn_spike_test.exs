@@ -1625,6 +1625,90 @@ defmodule DmnSpikeTest do
     end
   end
 
+  describe "problems" do
+    alias DmnSpike.{Dmn, Problems}
+
+    defp problems(m), do: Problems.list(m, Eval.run(m))
+
+    test "a clean model has none" do
+      assert problems(Model.sample()) == []
+      assert Problems.summary([]) == {"✓ No problems", "ok"}
+    end
+
+    test "the real Sample only has the warning that no rule matches yet (it has no input values)" do
+      {:ok, m, _} = Dmn.from_xml(File.read!("test/fixtures/Sample.dmn"))
+      assert [%{severity: :warning, message: "no rule matches the current input"}] = problems(m)
+    end
+
+    test "a FEEL error in a cell names the node and the cell" do
+      m = Model.set_text(Model.sample(), "front", 0, "1 +")
+      assert [%{severity: :error, target: {:node, "front"}, title: "Front End Ratio", message: msg}] = problems(m)
+      assert msg =~ "pmt:"
+    end
+
+    test "a value that breaks its type is an error on the node" do
+      m = Model.sample()
+      i = Enum.find_index(m.types, &(&1.name == "tRatio"))
+      types = List.update_at(m.types, i, &%{&1 | constraint: %{kind: :range, text: "[0..20]"}})
+      found = problems(%{m | types: types})
+      assert Enum.any?(found, &(&1.target == {:node, "front"} and &1.message =~ "does not fit its type"))
+    end
+
+    test "an empty, unconnected decision is a warning twice over" do
+      {m, id} = Model.add_node(Model.sample(), "decision", 10, 10)
+      found = problems(m) |> Enum.filter(&(&1.target == {:node, id}))
+      assert Enum.map(found, & &1.message) |> Enum.sort() == ["has no expression yet", "is not connected to anything"]
+      assert Enum.all?(found, &(&1.severity == :warning))
+      assert {"⚠ 2 warnings", "warn"} = Problems.summary(found)
+    end
+
+    test "decision tables: no match is a warning, two matches under UNIQUE an error, a broken entry an error" do
+      m = Model.sample()
+      m = Model.set_table_text(m, "risk", ["e", 0, 0], "> 1000")
+      m = Model.set_table_text(m, "risk", ["e", 1, 0], "> 1000")
+      m = Model.set_table_text(m, "risk", ["e", 2, 0], "> 1000")
+      found = problems(m) |> Enum.filter(&(&1.target == {:node, "risk"}))
+      assert Enum.any?(found, &(&1.severity == :warning and &1.message =~ "no rule matches"))
+
+      m = Model.set_hit_policy(Model.sample(), "risk", "UNIQUE")
+      m = Model.set_table_text(m, "risk", ["e", 0, 0], "-")
+      m = Model.set_table_text(m, "risk", ["e", 1, 0], "-")
+      m = Model.set_table_text(m, "risk", ["e", 0, 1], "-")
+      found = problems(m) |> Enum.filter(&(&1.target == {:node, "risk"}))
+      assert Enum.any?(found, &(&1.severity == :error and &1.message =~ "UNIQUE"))
+
+      m = Model.set_table_text(Model.sample(), "risk", ["e", 0, 0], "< <")
+      found = problems(m) |> Enum.filter(&(&1.target == {:node, "risk"}))
+      assert Enum.any?(found, &(&1.severity == :error and &1.message =~ "rule 1, input 1"))
+    end
+
+    test "an invalid constraint is a problem of the type, nested components included" do
+      m = Model.sample()
+      i = Enum.find_index(m.types, &(&1.name == "tApplicant"))
+
+      types =
+        List.update_at(m.types, i, fn t ->
+          %{t | components: List.update_at(t.components, 0, &%{&1 | constraint: %{kind: :expression, text: "(("}})}
+        end)
+
+      found = Problems.list(%{m | types: types}, Eval.run(m))
+      assert [%{target: {:type, ^i}, title: "tApplicant", message: msg}] = found
+      assert msg =~ "tApplicant.Income: invalid constraint"
+    end
+
+    test "errors come first and the popover text is escaped" do
+      {m, id} = Model.add_node(Model.sample(), "decision", 10, 10)
+      m = Model.rename(m, id, "<b>x</b>") |> Model.set_text("front", 0, "1 +")
+      found = problems(m)
+      assert hd(found).severity == :error
+      html = Problems.html(found, 100)
+      refute html =~ "<b>x</b>"
+      assert html =~ "&lt;b&gt;x&lt;/b&gt;"
+      assert html =~ ~s|data-click="problem-node:front"|
+      assert Problems.html(found, 1) =~ "and #{length(found) - 1} more"
+    end
+  end
+
   describe "descriptions" do
     alias DmnSpike.Dmn
 

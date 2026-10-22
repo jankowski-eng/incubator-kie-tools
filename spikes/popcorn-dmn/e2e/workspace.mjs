@@ -19,7 +19,9 @@ const xmlText = async () => {
   await page.locator(".xmlbtn").click();
   await page.waitForFunction(() => document.querySelectorAll("#xcode .xc").length > 0);
   await settle(400);
-  const t = await page.evaluate(() => [...document.querySelectorAll("#xcode .xc")].map((c) => c.textContent).join("\n") + "\n");
+  const t = await page.evaluate(
+    () => [...document.querySelectorAll("#xcode .xc")].map((c) => c.textContent).join("\n") + "\n"
+  );
   await page.locator(".xmlbtn").click();
   await settle(500);
   return t;
@@ -39,7 +41,11 @@ ok(
 // the canvas fills the area under the top bar and the dock floats over its bottom edge, so both are in view
 const stage = await page.locator(".stage").boundingBox();
 const panel = await page.locator("#panel table").first().boundingBox();
-ok("the canvas fills the window under the top bar", stage.x === 0 && stage.width >= 1279 && stage.y + stage.height >= 899, JSON.stringify(stage));
+ok(
+  "the canvas fills the window under the top bar",
+  stage.x === 0 && stage.width >= 1279 && stage.y + stage.height >= 899,
+  JSON.stringify(stage)
+);
 ok("canvas and the editing table are visible together", panel.y < 900 && panel.y > stage.y, `${panel.y}`);
 
 // selecting a node shows its expression in the dock without scrolling
@@ -104,9 +110,13 @@ const nn = await count("#scene g[data-id]"),
 // a node at the right edge gets its pad on its left side, so it is never cut off by the window
 await page.locator('#scene g[data-id="piti"] .shape').click({ force: true });
 await settle(400);
-const padBox = await page.locator('#pad-piti .pad').boundingBox();
+const padBox = await page.locator("#pad-piti .pad").boundingBox();
 const stageBox = await page.locator(".stage").boundingBox();
-ok("the pad stays inside the canvas", padBox.x >= stageBox.x && padBox.x + padBox.width <= stageBox.x + stageBox.width, JSON.stringify(padBox));
+ok(
+  "the pad stays inside the canvas",
+  padBox.x >= stageBox.x && padBox.x + padBox.width <= stageBox.x + stageBox.width,
+  JSON.stringify(padBox)
+);
 await page.locator('#scene g[data-id="front"] .shape').click({ force: true });
 await settle(400);
 await page.locator('#pad-front [data-create="input"]').click();
@@ -239,14 +249,21 @@ ok("an input can be joined to the source as its authority", (await count("#scene
 const xmlS = await xmlText();
 ok(
   "the XML has the source and both authority requirements",
-  xmlS.includes("<knowledgeSource") && xmlS.includes("<requiredAuthority") && xmlS.includes('<requiredInput href="#app"/>')
+  xmlS.includes("<knowledgeSource") &&
+    xmlS.includes("<requiredAuthority") &&
+    xmlS.includes('<requiredInput href="#app"/>')
 );
 await page.dragAndDrop('#palette [data-kind="source"]', "#drd", { targetPosition: { x: 120, y: 120 } });
 await settle(600);
 ok("a source can be dragged in from the palette", (await count("#scene g.source")) === 2);
 
 // groups
-await page.dragAndDrop('#palette [data-kind="group"]', "#drd", { targetPosition: { x: 400, y: 160 } });
+// drop it centred on Applicant Data, so that the group covers that node
+const appBox = await page.locator('#scene g[data-id="app"] .shape').boundingBox();
+const drdBox = await page.locator("#drd").boundingBox();
+await page.dragAndDrop('#palette [data-kind="group"]', "#drd", {
+  targetPosition: { x: appBox.x + appBox.width / 2 - drdBox.x, y: appBox.y + appBox.height / 2 - drdBox.y },
+});
 await settle(700);
 ok("a group can be dragged in from the palette", (await count("#scene g.group")) === 1);
 const gid = await page.locator("#scene g.group").getAttribute("data-id");
@@ -372,7 +389,9 @@ ok(
 await page.locator("[data-click=undo]").click();
 await settle(500);
 
-// only decisions offer a decision table
+// only decisions offer a decision table (fit the view first: earlier steps may have left a node under the header)
+await page.locator('[data-click="fit"]').click();
+await settle(300);
 await page.locator('#scene g[data-id="dti"] .shape').click();
 await settle(400);
 ok(
@@ -382,6 +401,47 @@ ok(
 await page.locator('#scene g[data-id="front"] .shape').click();
 await settle(400);
 ok("a decision has it", (await count("select[data-op=nexpr] option[value=table]")) === 1);
+
+// the problems list
+ok(
+  "a clean model says so",
+  (await text("#problems-btn")).includes("No problems") &&
+    (await page.locator("#problems-btn").getAttribute("data-level")) === "ok"
+);
+ok("the list is closed", await page.locator("#problems-pop").isHidden());
+await page.locator('#scene g[data-id="front"] .shape').click();
+await settle(400);
+await page.locator('[data-click="dock:expr"]').click();
+await settle(300);
+await page.locator('textarea[data-cell="front:4"]').fill("1 +");
+await settle(700);
+ok(
+  "a broken cell shows up as an error",
+  (await page.locator("#problems-btn").getAttribute("data-level")) === "bad" &&
+    (await text("#problems-btn")).includes("error"),
+  await text("#problems-btn")
+);
+await page.locator("#problems-btn").click();
+ok("the button opens the list", await page.locator("#problems-pop").isVisible());
+ok("it names the node and the cell", (await text("#problems-list .problem.error")).includes("Front End Ratio"));
+await page
+  .locator('#scene g[data-id="loan"] .shape')
+  .click({ force: true })
+  .catch(() => {});
+await page.keyboard.press("Escape");
+ok("Escape closes it", await page.locator("#problems-pop").isHidden());
+await page.locator('#scene g[data-id="app"] .shape').click();
+await settle(300);
+await page.locator("#problems-btn").click();
+await page.locator("#problems-list .problem.error").first().click();
+await settle(500);
+ok(
+  "clicking a problem selects its node",
+  (await count('.node.sel[data-id="front"]')) === 1 && (await page.locator("#problems-pop").isHidden())
+);
+await page.locator("[data-click=undo]").click();
+await settle(600);
+ok("fixing it clears the list", (await text("#problems-btn")).includes("No problems"));
 
 // type pill
 await page.locator('#scene g[data-id="front"] .shape').click();

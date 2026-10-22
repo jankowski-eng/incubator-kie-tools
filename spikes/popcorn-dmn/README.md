@@ -3,6 +3,7 @@
 Throwaway spike: can a DMN editor be built on [Popcorn](https://popcorn.swmansion.com) (real BEAM/OTP in WebAssembly) with almost no JavaScript?
 
 - `model.ex` – hardcoded DRD (loan pre-qualification), edges with kinds, cell edits, add/delete nodes, DMN requirement rules for connecting.
+- `problems.ex` – the Problems list (FEEL errors, type violations, tables that match nothing, empty expressions, invalid constraints, unconnected elements) behind the button in the toolbar.
 - `types.ex` / `types_panel.ex` – data types as in KIE's editor (built-in or custom type, structure components, list, enumeration/range/expression constraint as FEEL unary tests), validation of node values against them, rename refactoring, and the Data types tab.
 - `xml_index.ex` / `xml_view.ex` – the XML inspector: `XmlIndex` walks the document `Dmn.to_xml/2` writes (fresh, or an imported file written back by the overlay) and ties each node, requirement, type and field to its lines by the ids they carry; `XmlView` highlights the lines and resolves a line to the most specific element.
 - `constraint.ex` – the visual forms of a type constraint (comparison, interval, list of values) and their FEEL text; anything else stays raw FEEL.
@@ -49,7 +50,7 @@ Where the editor can and cannot run (iframes, popups, VS Code) is measured in [E
 
 ## Verification
 
-`mix test` covers the pure logic (563 tests, 450 of them random-edit round trips validated against DMN16.xsd, including the real KIE sample and the open-and-save guarantees). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, workspace layout and on-canvas actions, the XML inspector and its two-way selection, data types, the empty state and animations, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
+`mix test` covers the pure logic (590 tests, 450 of them random-edit round trips validated against DMN16.xsd, including the real KIE sample and the open-and-save guarantees). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, workspace layout and on-canvas actions, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
 
 Notes from building this:
 

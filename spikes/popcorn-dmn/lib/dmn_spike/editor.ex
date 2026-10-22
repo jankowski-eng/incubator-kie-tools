@@ -15,6 +15,7 @@ defmodule DmnSpike.Editor do
     Layout,
     Model,
     Panel,
+    Problems,
     Svg,
     Types,
     TypesPanel,
@@ -542,6 +543,15 @@ defmodule DmnSpike.Editor do
     |> Map.put(:selected, nil)
     |> render_all(true)
   end
+
+  defp event(%{"t" => "click", "what" => "problem-node:" <> id}, state) do
+    if state.model.nodes[id],
+      do: render_all(%{state | tab: "editor", selected: id, sel_edge: nil}, true),
+      else: state
+  end
+
+  defp event(%{"t" => "click", "what" => "problem-type:" <> i}, state),
+    do: render_all(%{state | tab: "types", type_sel: String.to_integer(i)}, true)
 
   defp event(%{"t" => "click", "what" => "dock:" <> dock}, state) when dock in ["expr", "props"] do
     state = %{state | dock: dock}
@@ -1375,9 +1385,20 @@ defmodule DmnSpike.Editor do
         do: Panel.table_ops(state.model, state.selected, results[state.selected]),
         else: []
 
+    problems = Problems.list(state.model, results)
+    {label, level} = Problems.summary(problems)
+
+    problem_ops = [
+      ["html", "#problems-btn", label],
+      ["attr", "#problems-btn", "data-level", level],
+      ["html", "#problems-list", Problems.html(problems, 100)]
+    ]
+
     node_ops ++
       shown ++
-      table ++ [["html", "#status", "evaluated #{n} cells in #{Float.round(us / 1000, 1)} ms"]] ++ history_ops(state)
+      table ++
+      problem_ops ++
+      [["html", "#status", "evaluated #{n} cells in #{Float.round(us / 1000, 1)} ms"]] ++ history_ops(state)
   end
 
   defp current_view(%{view: nil, model: m}), do: View.parse(Svg.viewbox(m))
