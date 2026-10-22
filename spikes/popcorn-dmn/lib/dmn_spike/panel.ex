@@ -20,6 +20,13 @@ defmodule DmnSpike.Panel do
       ~s|<dl><dt>Describes</dt><dd>#{chips(linked, "No element yet. Drag from the blue handle to one.")}</dd></dl></div>|
   end
 
+  defp artifact(m, %{type: :group} = node) do
+    inside = for k <- Model.members(m, node.id), n = m.nodes[k], do: {n.id, n.name, "member"}
+
+    ~s|<div class="props"><div class="srchead"><label class="desc">Group name<input class="nname" data-op="nname" data-id="#{node.id}" value="#{Fmt.esc(node.name)}" spellcheck="false"/></label></div>| <>
+      ~s|<dl><dt>Contains</dt><dd>#{chips(inside, "Nothing yet. Drag elements into the frame.")}</dd></dl></div>|
+  end
+
   defp artifact(m, %{type: :source} = node) do
     {from, to} = Model.authorities(m, node.id)
 

@@ -237,9 +237,12 @@ defmodule DmnSpike.Editor do
 
   defp event(%{"t" => "move", "x" => x, "y" => y}, %{drag: {id, dx, dy, started?}} = state) do
     state = if started?, do: state, else: push_history(state, nil)
+    # a group carries what is inside it
+    ids = if state.model.nodes[id].type == :group, do: [id | Model.members(state.model, id)], else: [id]
     model = Model.move(state.model, id, x - dx, y - dy)
 
-    patch([["attr", ~s|[data-id="#{id}"]|, "transform", Svg.transform(model.nodes[id])]] ++ edge_ops(model, id))
+    moves = for k <- ids, do: ["attr", ~s|[data-id="#{k}"]|, "transform", Svg.transform(model.nodes[k])]
+    patch(moves ++ (ids |> Enum.flat_map(&edge_ops(model, &1)) |> Enum.uniq()))
     %{state | model: model, drag: {id, dx, dy, true}}
   end
 

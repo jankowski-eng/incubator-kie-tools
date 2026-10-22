@@ -232,6 +232,95 @@ await page.dragAndDrop('#palette [data-kind="source"]', "#drd", { targetPosition
 await settle(600);
 ok("a source can be dragged in from the palette", (await count("#scene g.source")) === 2);
 
+// groups
+await page.dragAndDrop('#palette [data-kind="group"]', "#drd", { targetPosition: { x: 400, y: 160 } });
+await settle(700);
+ok("a group can be dragged in from the palette", (await count("#scene g.group")) === 1);
+const gid = await page.locator("#scene g.group").getAttribute("data-id");
+ok(
+  "it is drawn behind everything else",
+  (await page.locator("#scene g[data-id]").first().getAttribute("data-id")) === gid
+);
+ok(
+  "it has no connect handle or create pad",
+  (await count(`#scene g[data-id="${gid}"] .handle`)) === 0 && (await count(`#pad-${gid} [data-create]`)) === 0
+);
+ok("its panel has a name field", (await count(".props input.nname")) === 1);
+await page.locator(".props input.nname").fill("Loan inputs");
+await settle(400);
+ok("the group's name is shown in the diagram", (await text(`#nm-${gid}`)) === "Loan inputs");
+const gb0 = await page.locator(`#scene g[data-id="${gid}"] .shape`).boundingBox();
+const insideBefore = await page.locator('#scene g[data-id="front"] .shape').boundingBox();
+await page.locator('#scene g[data-id="app"] .shape').click();
+await settle(300);
+// clicking inside the frame, away from its border, reaches what is behind it, not the group
+await page.mouse.click(gb0.x + gb0.width / 2, gb0.y + gb0.height - 20);
+await settle(300);
+ok("the inside of the frame is not grabbable", (await count(`#scene g.group.sel`)) === 0);
+// resize the group to cover the Front End Ratio node, then drag the group by its title band
+await page.locator(`#scene g[data-id="${gid}"] .band`).click({ position: { x: 40, y: 12 } });
+await settle(300);
+ok("clicking the title band selects the group", (await count("#scene g.group.sel")) === 1);
+const rz2 = await page.locator(`#scene g[data-id="${gid}"] .resize`).boundingBox();
+await page.mouse.move(rz2.x + rz2.width / 2, rz2.y + rz2.height / 2);
+await page.mouse.down();
+await page.mouse.move(rz2.x + rz2.width / 2 + 120, rz2.y + rz2.height / 2 + 20, { steps: 5 });
+await page.mouse.up();
+await settle(500);
+const gb1 = await page.locator(`#scene g[data-id="${gid}"] .shape`).boundingBox();
+ok("dragging the corner resizes the group", gb1.width > gb0.width + 60, `${gb0.width} -> ${gb1.width}`);
+// drag the group by its band: the elements it covers go along, the others stay (compared in diagram units,
+// since the view re-fits when the diagram grows)
+const origins = () =>
+  page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll("#scene g[data-id]")].map((g) => {
+        const [x, y] = g
+          .getAttribute("transform")
+          .match(/-?\d+(\.\d+)?/g)
+          .map(Number);
+        const r = g.querySelector(".shape").getBBox();
+        return [g.dataset.id, { x, y, w: r.width, h: r.height }];
+      })
+    )
+  );
+const pos0 = await origins();
+const frame = pos0[gid];
+const covered = Object.keys(pos0).filter(
+  (id) =>
+    id !== gid &&
+    pos0[id].x >= frame.x &&
+    pos0[id].y >= frame.y &&
+    pos0[id].x + pos0[id].w <= frame.x + frame.w &&
+    pos0[id].y + pos0[id].h <= frame.y + frame.h
+);
+const band = await page.locator(`#scene g[data-id="${gid}"] .band`).boundingBox();
+const k = (await page.locator("#drd").evaluate((el) => el.getScreenCTM().a)) || 1;
+await page.mouse.move(band.x + 60, band.y + 12);
+await page.mouse.down();
+await page.mouse.move(band.x + 60 - 40 * k, band.y + 12 + 10 * k, { steps: 5 });
+await page.mouse.up();
+await settle(500);
+const pos1 = await origins();
+const delta = (id) => [Math.round(pos1[id].x - pos0[id].x), Math.round(pos1[id].y - pos0[id].y)];
+const carried =
+  covered.length > 0 &&
+  Object.keys(pos0).every((id) =>
+    id === gid || covered.includes(id) ? delta(id).join() === "-40,10" : delta(id).join() === "0,0"
+  );
+ok(
+  "moving a group takes what is inside it along",
+  carried,
+  `covered: ${covered.join(",")}; ${Object.keys(pos0)
+    .map((id) => id + delta(id))
+    .join(" ")}`
+);
+for (let i = 0; i < 4; i++) {
+  await page.locator("[data-click=undo]").click();
+  await settle(400);
+}
+ok("undo removes the group again", (await count("#scene g.group")) === 0);
+
 // type pill
 await page.locator('#scene g[data-id="front"] .shape').click();
 await settle();

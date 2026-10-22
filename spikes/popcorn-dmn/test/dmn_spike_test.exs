@@ -784,6 +784,99 @@ defmodule DmnSpikeTest do
     end
   end
 
+  describe "groups" do
+    alias DmnSpike.Dmn
+
+    defp group_around(m, ids) do
+      ns = Enum.map(ids, &m.nodes[&1])
+      x = Enum.min(Enum.map(ns, & &1.x)) - 20
+      y = Enum.min(Enum.map(ns, & &1.y)) - 40
+      {m, g} = Model.add_node(m, "group", 0, 0)
+
+      m =
+        put_in(m.nodes[g], %{
+          m.nodes[g]
+          | x: x,
+            y: y,
+            w: Enum.max(Enum.map(ns, &(&1.x + &1.w))) + 20 - x,
+            h: Enum.max(Enum.map(ns, &(&1.y + &1.h))) + 20 - y
+        })
+
+      {m, g}
+    end
+
+    test "a group knows what is inside it, and moving it moves them" do
+      {m, g} = group_around(Model.sample(), ["app", "prod"])
+      assert Enum.sort(Model.members(m, g)) == ["app", "prod"]
+      before = Map.new(m.nodes, fn {k, n} -> {k, {n.x, n.y}} end)
+      {gx, gy} = before[g]
+      m2 = Model.move(m, g, gx + 50, gy - 30)
+
+      for k <- [g, "app", "prod"] do
+        {x, y} = before[k]
+        assert {m2.nodes[k].x, m2.nodes[k].y} == {x + 50, y - 30}, k
+      end
+
+      assert {m2.nodes["front"].x, m2.nodes["front"].y} == before["front"], "elements outside stay"
+      # moving a plain node does not drag anything
+      m3 = Model.move(m, "app", 0, 0)
+      assert {m3.nodes["prod"].x, m3.nodes["prod"].y} == before["prod"]
+    end
+
+    test "a group is not evaluated, has no pad and cannot be connected" do
+      {m, g} = group_around(Model.sample(), ["app"])
+      assert Eval.run(m)["front"].value == Eval.run(Model.sample())["front"].value
+      assert Model.pad_kinds(:group) == []
+      assert {:error, _} = Model.connect(m, g, "front")
+      assert {:error, _} = Model.connect(m, "app", g)
+      assert Model.artifact?(m.nodes[g])
+    end
+
+    test "a fresh export writes the group and its shape, and reads back" do
+      {m, g} = group_around(Model.sample(), ["app", "prod"])
+      m = Model.rename(m, g, "Inputs")
+      xml = Dmn.to_xml(m)
+      assert xml =~ ~s|<group id="#{g}" name="Inputs"/>|
+      assert xml =~ ~s|dmnElementRef="#{g}"|
+      {:ok, m2, r} = Dmn.from_xml(xml)
+      assert m2.nodes[g].type == :group and m2.nodes[g].name == "Inputs"
+      assert r.artifacts == %{group: 1}
+      assert Enum.sort(Model.members(m2, g)) == ["app", "prod"]
+    end
+
+    test "in a real file a group keeps its documentation, and a new one is added in the file's prefixes" do
+      xml = """
+      <dmn:definitions xmlns:dmn="https://www.omg.org/spec/DMN/20240513/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20230324/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" name="d" id="d1">
+        <dmn:inputData id="i" name="In"><dmn:variable id="i-v" name="In"/></dmn:inputData>
+        <dmn:group id="g" name="Old"><dmn:documentation>Notes</dmn:documentation></dmn:group>
+        <dmndi:DMNDI>
+          <dmndi:DMNDiagram id="dg">
+            <dmndi:DMNShape id="si" dmnElementRef="i"><dc:Bounds x="40" y="40" width="150" height="60"/></dmndi:DMNShape>
+            <dmndi:DMNShape id="sg" dmnElementRef="g"><dc:Bounds x="10" y="10" width="300" height="200"/></dmndi:DMNShape>
+          </dmndi:DMNDiagram>
+        </dmndi:DMNDI>
+      </dmn:definitions>
+      """
+
+      {:ok, m, r} = Dmn.from_xml(xml)
+      assert r.artifacts == %{group: 1} and r.nodes == 1
+      assert Model.members(m, "g") == ["i"]
+      assert parse_xml(Dmn.to_xml(m)) == parse_xml(xml), "untouched"
+
+      out = m |> Model.rename("g", "New") |> Dmn.to_xml()
+      assert out =~ ~s|<dmn:group id="g" name="New">|
+      assert out =~ "<dmn:documentation>Notes</dmn:documentation>"
+
+      out = m |> Model.move("g", 100, 100) |> Dmn.to_xml()
+      assert out =~ ~s|<dc:Bounds x="100" y="100" width="300" height="200"/>|
+      assert out =~ ~s|<dc:Bounds x="130" y="130" width="150" height="60"/>|, "the contained input moved with it"
+
+      {m2, n} = Model.add_node(m, "group", 500, 500)
+      out = Dmn.to_xml(m2)
+      assert out =~ ~s|<dmn:group id="#{n}" name="New group"/>|
+    end
+  end
+
   describe "descriptions" do
     alias DmnSpike.Dmn
 
@@ -827,6 +920,20 @@ defmodule DmnSpikeTest do
       assert Enum.sort(Enum.map(by, &elem(&1, 0))) == ["back", "loan", "risk"]
       assert {"back", _, :info} = Enum.find(by, &(elem(&1, 0) == "back"))
     end
+  end
+
+  # canonical form of an XML document, for comparing documents (no whitespace-only text, sorted attributes)
+  defp parse_xml(xml) do
+    canon = fn canon, {tag, attrs, kids} ->
+      kids =
+        for k <- kids,
+            not (is_binary(k) and String.trim(k) == ""),
+            do: if(is_binary(k), do: String.trim(k), else: canon.(canon, k))
+
+      {tag, Enum.sort(attrs), kids}
+    end
+
+    xml |> Saxy.SimpleForm.parse_string() |> elem(1) |> then(&canon.(canon, &1))
   end
 
   describe "a file survives being opened and saved" do

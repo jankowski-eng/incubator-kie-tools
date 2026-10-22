@@ -1314,6 +1314,36 @@
       .props .srchead input {
         height: 34px;
       }
+
+      /* groups: a dashed frame behind what it groups */
+      .pal.group svg > * {
+        fill: none;
+        stroke: var(--text);
+      }
+      .node.group .frame {
+        fill: color-mix(in srgb, var(--text) 3%, transparent);
+        pointer-events: none;
+      }
+      .node.group .shape {
+        fill: none;
+        stroke: var(--muted);
+        stroke-width: 1.5;
+        stroke-dasharray: 7 5;
+        pointer-events: stroke;
+      }
+      .node.group.sel .shape {
+        stroke: var(--accent);
+        stroke-dasharray: none;
+      }
+      .node.group .band {
+        fill: transparent;
+        cursor: grab;
+      }
+      .node.group .gname {
+        fill: var(--muted);
+        font-weight: 600;
+        pointer-events: none;
+      }
     </style>
   </head>
   <body>
@@ -1385,6 +1415,17 @@
             >
               <svg viewBox="0 0 42 28" aria-hidden="true">
                 <path d="M1 1H41V22C33 15 33 29 21 22S9 15 1 22Z" stroke-linejoin="round" />
+              </svg>
+            </div>
+            <div
+              class="pal group"
+              draggable="true"
+              data-kind="group"
+              title="Group: drag onto the canvas"
+              aria-label="Group"
+            >
+              <svg viewBox="0 0 42 28" aria-hidden="true">
+                <rect x="1" y="1" width="40" height="26" rx="5" stroke-dasharray="4 3" />
               </svg>
             </div>
             <div

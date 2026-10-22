@@ -98,7 +98,20 @@ defmodule DmnSpike.Model do
   def resize(%__MODULE__{} = m, id, x, y),
     do: update_in(m.nodes[id], &%{&1 | w: max(round(x - &1.x), 60), h: max(round(y - &1.y), 30)})
 
-  def move(%__MODULE__{} = m, id, x, y), do: update_in(m.nodes[id], &%{&1 | x: round(x), y: round(y)})
+  @doc "The elements that lie completely inside group `id`."
+  def members(%__MODULE__{} = m, id) do
+    g = m.nodes[id]
+
+    for {k, n} <- m.nodes, k != id, n.x >= g.x, n.y >= g.y, n.x + n.w <= g.x + g.w, n.y + n.h <= g.y + g.h, do: k
+  end
+
+  @doc "Moves a node to `{x, y}`; a group takes the elements inside it along."
+  def move(%__MODULE__{} = m, id, x, y) do
+    n = m.nodes[id]
+    {dx, dy} = {round(x) - n.x, round(y) - n.y}
+    ids = if n.type == :group, do: [id | members(m, id)], else: [id]
+    Enum.reduce(ids, m, fn k, acc -> update_in(acc.nodes[k], &%{&1 | x: &1.x + dx, y: &1.y + dy}) end)
+  end
 
   @hit_policies ["UNIQUE", "FIRST", "ANY", "COLLECT", "RULE ORDER"]
   def hit_policies, do: @hit_policies
@@ -258,9 +271,10 @@ defmodule DmnSpike.Model do
     "input" => {:input, "input data"},
     "bkm" => {:bkm, "business knowledge"},
     "annotation" => {:annotation, "annotation"},
-    "source" => {:source, "knowledge source"}
+    "source" => {:source, "knowledge source"},
+    "group" => {:group, "group"}
   }
-  @sizes %{annotation: {200, 60}}
+  @sizes %{annotation: {200, 60}, group: {320, 200}}
 
   @doc "Adds a node of `kind` centred on `{x, y}`; returns `{model, id}`."
   def add_node(%__MODULE__{} = m, kind, x, y) do
@@ -295,7 +309,7 @@ defmodule DmnSpike.Model do
     do: for(kind <- ["input", "decision", "bkm"], valid_pair?(elem(@kinds[kind], 0), type), do: kind)
 
   @doc "What the create pad offers for a node of `type`: what it requires, and an annotation."
-  def pad_kinds(:annotation), do: []
+  def pad_kinds(type) when type in [:annotation, :group], do: []
   def pad_kinds(:input), do: ["annotation"]
   def pad_kinds(:source), do: ["input", "decision", "source", "annotation"]
   def pad_kinds(type), do: required_kinds(type) ++ ["source", "annotation"]

@@ -17,7 +17,7 @@ defmodule DmnSpike.Dmn.Overlay do
 
   alias DmnSpike.{Dmn, Model, Svg}
 
-  @elements ~w(inputData decision businessKnowledgeModel textAnnotation knowledgeSource)
+  @elements ~w(inputData decision businessKnowledgeModel textAnnotation knowledgeSource group)
   @expr_tags ~w(literalExpression context decisionTable invocation relation functionDefinition list conditional filter for some every)
 
   # the order of children DMN's schema prescribes (unknown children go before the expression)
@@ -376,6 +376,12 @@ defmodule DmnSpike.Dmn.Overlay do
 
   defp fresh_description(node, pre),
     do: if(Model.description(node) == "", do: [], else: [q(Dmn.el("description", [], [node.description]), pre)])
+
+  # a group has a name and nothing else the editor models; its documentation and extensions stay
+  defp regen_node(_m, %{type: :group} = node, %{raw: {tag, attrs, kids}}, _pre),
+    do:
+      {:el, tag, put_attrs(attrs, [{"id", node.id}, {"name", node.name}]),
+       for(r <- kids, is_tuple(r), do: from_simple(r))}
 
   defp regen_node(m, %{type: :source} = node, %{raw: {tag, attrs, kids}}, pre) do
     raw = Enum.filter(kids, &is_tuple/1)

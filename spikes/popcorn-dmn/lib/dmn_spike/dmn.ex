@@ -27,7 +27,8 @@ defmodule DmnSpike.Dmn do
     "decision" => :decision,
     "businessKnowledgeModel" => :bkm,
     "textAnnotation" => :annotation,
-    "knowledgeSource" => :source
+    "knowledgeSource" => :source,
+    "group" => :group
   }
   @known_top [
     "itemDefinition",
@@ -39,6 +40,7 @@ defmodule DmnSpike.Dmn do
     "description",
     "textAnnotation",
     "knowledgeSource",
+    "group",
     "association"
   ]
 
@@ -92,6 +94,8 @@ defmodule DmnSpike.Dmn do
 
   @doc false
   def node_xml(_m, %{type: :annotation} = n), do: el("textAnnotation", [{"id", n.id}], [el("text", [], [n.name])])
+
+  def node_xml(_m, %{type: :group} = n), do: el("group", [{"id", n.id}, {"name", n.name}], [])
 
   def node_xml(m, %{type: :source} = n) do
     desc = if Model.description(n) == "", do: [], else: [el("description", [], [n.description])]
@@ -493,7 +497,7 @@ defmodule DmnSpike.Dmn do
     {n, Enum.map(expr_notes, &"#{name}: #{&1}")}
   end
 
-  defp expression(type, _kids) when type in [:annotation, :source], do: {Model.artifact_expr(), []}
+  defp expression(type, _kids) when type in [:annotation, :source, :group], do: {Model.artifact_expr(), []}
 
   defp expression(:input, kids) do
     ext = find(kids, "extensionElements")

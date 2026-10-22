@@ -100,6 +100,19 @@ defmodule DmnSpike.Svg do
 
   def node_html(n, result, selected), do: n |> node(result, selected) |> IO.iodata_to_binary()
 
+  defp node(%{type: :group} = n, _result, selected) do
+    [
+      ~s|<g class="#{node_class(n.id == selected, false, n.type)}" data-id="#{n.id}" transform="#{transform(n)}">|,
+      shape(n),
+      ~s|<text id="nm-#{n.id}" class="gname" x="12" y="19" font-size="12.5">#{Fmt.esc(n.name)}</text>|,
+      ~s|<g class="resize" data-resize="#{n.id}" transform="translate(#{n.w} #{n.h})"><title>Resize</title><rect x="-14" y="-14" width="14" height="14"/><path d="M-10 -2L-2 -10M-6 -2L-2 -6"/></g>|,
+      del(n),
+      ~s|<g id="info-#{n.id}"></g>|,
+      ~s|<g id="pad-#{n.id}"></g>|,
+      "</g>"
+    ]
+  end
+
   defp node(%{type: :annotation} = n, _result, selected) do
     [
       ~s|<g class="#{node_class(n.id == selected, false, n.type)}" data-id="#{n.id}" transform="#{transform(n)}">|,
@@ -206,6 +219,11 @@ defmodule DmnSpike.Svg do
 
     ~s|<path class="shape source" d="#{d}" stroke-linejoin="round"/>|
   end
+
+  # group: a dashed frame; only its border and title band can be grabbed, so what is inside stays reachable
+  defp shape(%{type: :group} = n),
+    do:
+      ~s|<rect class="frame" x="0" y="0" width="#{n.w}" height="#{n.h}" rx="12"/><rect class="shape group" width="#{n.w}" height="#{n.h}" rx="12"/><rect class="band" width="#{n.w}" height="28" rx="12"/>|
 
   defp shape(%{type: :decision} = n), do: ~s|<rect class="shape decision" width="#{n.w}" height="#{n.h}" rx="5"/>|
 
