@@ -1318,6 +1318,30 @@ defmodule DmnSpikeTest do
       assert Enum.all?(refs, &MapSet.member?(ids, &1)), "and it refers to an element that exists"
     end
 
+    test "new DRG elements go before the artifacts, new artifacts after the DRG elements" do
+      m = import3!(File.read!("test/fixtures/kie_sample.dmn"))
+      {m, d} = Model.add_node(m, "decision", 10, 10)
+      {m, a} = Model.add_node(m, "annotation", 10, 10)
+      {m, g} = Model.add_node(m, "group", 10, 10)
+      out = Dmn.to_xml(m)
+      at = fn id -> out |> :binary.match(~s|id="#{id}"|) |> elem(0) end
+      assert at.(d) < at.("_note"), "the new decision is before the existing annotation"
+      assert at.("_bureau") < at.(a) and at.("_loan_d") < at.(g), "artifacts follow the DRG elements"
+
+      fresh = Model.sample() |> then(fn m -> m |> Model.add_node("annotation", 5, 5) |> elem(0) end) |> Dmn.to_xml()
+
+      assert :binary.match(fresh, "<textAnnotation") |> elem(0) >
+               :binary.match(fresh, ~s|<decision id="risk"|) |> elem(0)
+    end
+
+    test "a description on an annotation or a group is written and read back" do
+      {m, a} = Model.add_node(Model.sample(), "annotation", 5, 5)
+      {m, g} = Model.add_node(m, "group", 5, 5)
+      m = m |> Model.set_description(a, "about the note") |> Model.set_description(g, "about the group")
+      {:ok, m2, _} = m |> Dmn.to_xml() |> Dmn.from_xml()
+      assert m2.nodes[a].description == "about the note" and m2.nodes[g].description == "about the group"
+    end
+
     test "a moved edge keeps its style before the waypoints and its label after them" do
       xml =
         doc3("""

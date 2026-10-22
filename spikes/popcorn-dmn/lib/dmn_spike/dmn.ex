@@ -52,7 +52,8 @@ defmodule DmnSpike.Dmn do
   def to_xml(%Model{doc: doc} = m, _name) when doc != nil, do: Overlay.to_xml(m)
 
   def to_xml(%Model{} = m, name) do
-    nodes = m.nodes |> Map.values() |> Enum.sort_by(& &1.id)
+    # DRG elements first, then annotations and groups, as the schema has it
+    nodes = m.nodes |> Map.values() |> Enum.sort_by(&{&1.type in [:annotation, :group], &1.id})
 
     root =
       el(
@@ -98,15 +99,16 @@ defmodule DmnSpike.Dmn do
       ])
     ]
 
+  defp description_xml(n), do: if(Model.description(n) == "", do: [], else: [el("description", [], [n.description])])
+
   @doc false
-  def node_xml(_m, %{type: :annotation} = n), do: el("textAnnotation", [{"id", n.id}], [el("text", [], [n.name])])
+  def node_xml(_m, %{type: :annotation} = n),
+    do: el("textAnnotation", [{"id", n.id}], description_xml(n) ++ [el("text", [], [n.name])])
 
-  def node_xml(_m, %{type: :group} = n), do: el("group", [{"id", n.id}, {"name", n.name}], [])
+  def node_xml(_m, %{type: :group} = n), do: el("group", [{"id", n.id}, {"name", n.name}], description_xml(n))
 
-  def node_xml(m, %{type: :source} = n) do
-    desc = if Model.description(n) == "", do: [], else: [el("description", [], [n.description])]
-    el("knowledgeSource", [{"id", n.id}, {"name", n.name}], desc ++ authority_xml(m, n))
-  end
+  def node_xml(m, %{type: :source} = n),
+    do: el("knowledgeSource", [{"id", n.id}, {"name", n.name}], description_xml(n) ++ authority_xml(m, n))
 
   def node_xml(m, n) do
     tag = Enum.find_value(@elements, fn {t, k} -> if k == n.type, do: t end)
@@ -139,7 +141,7 @@ defmodule DmnSpike.Dmn do
           expression_xml(n.expr)
       end
 
-    desc = if Model.description(n) == "", do: [], else: [el("description", [], [n.description])]
+    desc = description_xml(n)
     # the schema puts extensionElements (the value of an input) before the variable
     {ext, body} = if n.type == :input, do: {body, []}, else: {[], body}
     reqs = info ++ know ++ authority_xml(m, n)

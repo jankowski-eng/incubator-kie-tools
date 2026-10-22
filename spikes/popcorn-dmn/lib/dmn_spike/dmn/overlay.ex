@@ -343,33 +343,49 @@ defmodule DmnSpike.Dmn.Overlay do
       |> Enum.with_index()
       |> Enum.map(fn {t, i} -> q(Dmn.item_xml(t, "_t-new#{i}-#{:erlang.phash2(t.name)}"), pre) end)
 
-    new_nodes =
+    # definitions holds the DRG elements (decisions, inputs, business knowledge, knowledge sources) before the
+    # artifacts (annotations, groups, associations): new elements go into their own section
+    {new_art_nodes, new_drg_nodes} =
       m.nodes
       |> Map.values()
       |> Enum.reject(&Map.has_key?(doc.nodes, &1.id))
       |> Enum.sort_by(& &1.id)
-      |> Enum.map(&q(Dmn.node_xml(m, &1), pre))
+      |> Enum.split_with(&xml_artifact?/1)
+
+    new_drg = Enum.map(new_drg_nodes, &q(Dmn.node_xml(m, &1), pre))
 
     new_links =
       for({_, _, :association} = l <- m.links, not Map.has_key?(doc.links, l), do: l)
       |> Enum.map(&q(Dmn.link_xml(&1), pre))
 
+    new_art = Enum.map(new_art_nodes, &q(Dmn.node_xml(m, &1), pre)) ++ new_links
+
     indexed = Enum.with_index(doc.children)
     idx = fn pred -> indexed |> Enum.filter(fn {mk, _} -> pred.(mk) end) |> Enum.map(&elem(&1, 1)) end
-    type_idx = idx.(&match?({:type, _}, &1))
-    node_idx = idx.(&match?({:node, _}, &1))
-    dmndi_idx = idx.(&(&1 == :dmndi))
 
-    types_at = insertion(type_idx, List.first(node_idx ++ dmndi_idx))
-    nodes_at = insertion(node_idx, List.first(dmndi_idx))
-    links_at = insertion(idx.(&match?({:link, _}, &1)), List.first(dmndi_idx))
+    artifact_marker? = fn
+      {:node, id} -> doc.nodes[id] != nil and Dmn.local(elem(doc.nodes[id].raw, 0)) in ["textAnnotation", "group"]
+      {:link, _} -> true
+      {:duplicate, _, _} -> true
+      _ -> false
+    end
+
+    type_idx = idx.(&match?({:type, _}, &1))
+    art_idx = idx.(artifact_marker?)
+    drg_idx = idx.(&(match?({:node, _}, &1) and not artifact_marker?.(&1)))
+    dmndi_idx = idx.(&(&1 == :dmndi))
+    first = fn list -> if list == [], do: nil, else: Enum.min(list) end
+
+    types_at = insertion(type_idx, first.(drg_idx ++ art_idx ++ dmndi_idx))
+    drg_at = insertion(drg_idx, first.(art_idx ++ dmndi_idx))
+    art_at = insertion(art_idx, first.(dmndi_idx))
 
     body =
       Enum.flat_map(indexed, fn {marker, i} ->
         before =
           if(types_at == {:before, i}, do: new_types, else: []) ++
-            if(nodes_at == {:before, i}, do: new_nodes, else: []) ++
-            if links_at == {:before, i}, do: new_links, else: []
+            if(drg_at == {:before, i}, do: new_drg, else: []) ++
+            if art_at == {:before, i}, do: new_art, else: []
 
         item =
           case marker do
@@ -397,16 +413,18 @@ defmodule DmnSpike.Dmn.Overlay do
 
         after_ =
           if(types_at == {:after, i}, do: new_types, else: []) ++
-            if(nodes_at == {:after, i}, do: new_nodes, else: []) ++
-            if links_at == {:after, i}, do: new_links, else: []
+            if(drg_at == {:after, i}, do: new_drg, else: []) ++
+            if art_at == {:after, i}, do: new_art, else: []
 
         before ++ item ++ after_
       end)
 
     body ++
       if(types_at == :end, do: new_types, else: []) ++
-      if(nodes_at == :end, do: new_nodes, else: []) ++ if links_at == :end, do: new_links, else: []
+      if(drg_at == :end, do: new_drg, else: []) ++ if art_at == :end, do: new_art, else: []
   end
+
+  defp xml_artifact?(%{type: type}), do: type in [:annotation, :group]
 
   # new elements go after the last element of their kind, else before `fallback`, else at the end
   defp insertion([], nil), do: :end
@@ -438,30 +456,30 @@ defmodule DmnSpike.Dmn.Overlay do
     end
   end
 
+  # an unchanged description keeps its original element (attributes included)
+  defp description_out([r | _], node, pre) do
+    if Dmn.text(r) == Model.description(node), do: [from_simple(r)], else: fresh_description(node, pre)
+  end
+
+  defp description_out([], node, pre), do: fresh_description(node, pre)
+
   defp fresh_description(node, pre),
     do: if(Model.description(node) == "", do: [], else: [q(Dmn.el("description", [], [node.description]), pre)])
 
   # a group has a name and nothing else the editor models; its documentation and extensions stay
-  defp regen_node(_m, %{type: :group} = node, %{raw: {tag, attrs, kids}}, _pre),
-    do:
-      {:el, tag, put_attrs(attrs, [{"id", node.id}, {"name", node.name}]),
-       for(r <- kids, is_tuple(r), do: from_simple(r))}
+  defp regen_node(_m, %{type: :group} = node, %{raw: {tag, attrs, kids}}, pre) do
+    raw = for r <- kids, is_tuple(r), do: r
+    description = description_out(Enum.filter(raw, &(Dmn.local(elem(&1, 0)) == "description")), node, pre)
+    others = for r <- raw, Dmn.local(elem(r, 0)) != "description", do: from_simple(r)
+    {:el, tag, put_attrs(attrs, [{"id", node.id}, {"name", node.name}]), description ++ others}
+  end
 
   defp regen_node(m, %{type: :source} = node, %{raw: {tag, attrs, kids}}, pre) do
     raw = Enum.filter(kids, &is_tuple/1)
     named = fn name -> Enum.filter(raw, &(Dmn.local(elem(&1, 0)) == name)) end
     reqs = requirements_out(m, node, raw_requirements(raw), pre)
 
-    description =
-      case named.("description") do
-        [r | _] ->
-          if Dmn.text(r) == Model.description(node),
-            do: [from_simple(r)],
-            else: fresh_description(node, pre)
-
-        [] ->
-          fresh_description(node, pre)
-      end
+    description = description_out(named.("description"), node, pre)
 
     others = for r <- raw, Dmn.local(elem(r, 0)) not in ["description", "authorityRequirement"], do: from_simple(r)
     attrs = put_attrs(attrs, [{"id", node.id}, {"name", node.name}])
@@ -470,7 +488,7 @@ defmodule DmnSpike.Dmn.Overlay do
 
   defp regen_node(_m, %{type: :annotation} = node, %{raw: {tag, attrs, kids}}, pre) do
     raw = Enum.filter(kids, &is_tuple/1)
-    others = for r <- raw, Dmn.local(elem(r, 0)) != "text", do: from_simple(r)
+    others = for r <- raw, Dmn.local(elem(r, 0)) not in ["text", "description"], do: from_simple(r)
 
     text =
       case Enum.find(raw, &(Dmn.local(elem(&1, 0)) == "text")) do
@@ -481,7 +499,8 @@ defmodule DmnSpike.Dmn.Overlay do
           q(Dmn.el("text", [], [node.name]), pre)
       end
 
-    {:el, tag, put_attrs(attrs, [{"id", node.id}]), others ++ [text]}
+    description = description_out(Enum.filter(raw, &(Dmn.local(elem(&1, 0)) == "description")), node, pre)
+    {:el, tag, put_attrs(attrs, [{"id", node.id}]), description ++ others ++ [text]}
   end
 
   defp regen_node(m, node, %{raw: {tag, attrs, kids}, efp: efp}, pre) do
@@ -548,11 +567,7 @@ defmodule DmnSpike.Dmn.Overlay do
         @expr_tags
 
     # an unchanged description keeps its original element (attributes included)
-    description =
-      case named.("description") do
-        [r | _] -> if(Dmn.text(r) == Model.description(node), do: [from_simple(r)], else: fresh.("description"))
-        [] -> fresh.("description")
-      end
+    description = description_out(named.("description"), node, pre)
 
     others = for r <- raw, Dmn.local(elem(r, 0)) not in handled, do: from_simple(r)
     kind = %{input: :input, decision: :decision, bkm: :bkm}[node.type]
