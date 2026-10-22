@@ -225,6 +225,207 @@ defmodule DmnSpikeTest do
     end
   end
 
+  describe "a blank model" do
+    alias DmnSpike.{Dmn, Eval, XmlIndex}
+
+    test "evaluates, exports and imports as an empty DMN" do
+      m = %Model{}
+      assert Eval.run(m) == %{}
+      assert DmnSpike.Svg.viewbox(m) == "0 0 820 370"
+      x = XmlIndex.build(m, "Untitled")
+      assert x.ranges == [] and x.text =~ ~s|name="Untitled"|
+      assert {:ok, m2, report} = Dmn.from_xml(x.text)
+      assert map_size(m2.nodes) == 0 and m2.edges == [] and m2.types == [] and report.name == "Untitled"
+    end
+
+    test "the first node can be a decision table" do
+      {m, id} = Model.add_node(%Model{}, "decision", 410, 185)
+      m = Model.set_expr_kind(m, id, :table)
+      assert Model.kind(m.nodes[id]) == :table
+      assert m.nodes[id].x == 335 and m.nodes[id].y == 155
+    end
+  end
+
+  describe "XML source ranges" do
+    alias DmnSpike.{Dmn, XmlIndex, XmlView}
+
+    defp imported(file) do
+      {:ok, m, _} = Dmn.from_xml(File.read!(Path.join(__DIR__, "fixtures/" <> file)))
+      m
+    end
+
+    test "the indexed document is the same text as to_xml" do
+      m = Model.sample()
+      x = XmlIndex.build(m, "Loan")
+      assert x.text == Dmn.to_xml(m, "Loan")
+      assert Enum.join(x.lines, "\n") <> "\n" == x.text
+    end
+
+    test "each range starts and ends on the element it names" do
+      x = XmlIndex.build(Model.sample())
+
+      for {from, to, key} <- x.ranges do
+        open = x.lines |> Enum.at(from - 1) |> String.trim()
+        close = x.lines |> Enum.at(to - 1) |> String.trim()
+        tag = open |> String.trim_leading("<") |> String.split([" ", ">", "/"]) |> hd()
+        assert String.starts_with?(open, "<" <> tag), inspect({key, open})
+
+        assert close == "</#{tag}>" or String.ends_with?(close, "/>") or String.contains?(close, "</#{tag}>"),
+               inspect({key, close})
+      end
+
+      {from, to} = XmlView.range(x, {:node, "front"})
+      assert Enum.at(x.lines, from - 1) == ~s|  <decision id="front" name="Front End Ratio">|
+      assert Enum.at(x.lines, to - 1) == "  </decision>"
+      {from, _} = XmlView.range(x, {:type, [0, 1]})
+      assert Enum.at(x.lines, from - 1) == ~s|    <itemComponent id="_t0-1" name="Tax">|
+      {from, _} = XmlView.range(x, {:edge, "front", "risk"})
+      assert Enum.at(x.lines, from - 1) =~ ~s|<informationRequirement id="_req-front-risk">|
+    end
+
+    test "a position resolves to the most specific element, or to nothing" do
+      x = XmlIndex.build(Model.sample())
+      {from, to} = XmlView.range(x, {:node, "front"})
+      assert XmlView.key_at(x, from) == {:node, "front"}
+      assert XmlView.key_at(x, div(from + to, 2)) == {:node, "front"}
+      {rf, _} = XmlView.range(x, {:edge, "app", "front"})
+      assert XmlView.key_at(x, rf + 1) == {:edge, "app", "front"}
+      assert XmlView.key_at(x, 1) == nil
+      assert XmlView.key_at(x, 2) == nil
+    end
+
+    test "ranges follow the model: a rename keeps the key, a new node adds one, a deleted one is gone" do
+      m = Model.sample()
+      renamed = Model.rename(m, "risk", "Risk Level")
+      assert XmlView.range(XmlIndex.build(renamed), {:node, "risk"}) != nil
+
+      assert Enum.at(
+               XmlIndex.build(renamed).lines,
+               elem(XmlView.range(XmlIndex.build(renamed), {:node, "risk"}), 0) - 1
+             ) =~ "Risk Level"
+
+      {added, id} = Model.add_node(m, "decision", 10, 10)
+      assert XmlView.range(XmlIndex.build(added), {:node, id}) != nil
+      assert XmlView.range(XmlIndex.build(Model.delete_node(added, id)), {:node, id}) == nil
+    end
+
+    test "the lines are exactly the text the writer produces, fresh or imported" do
+      for model <- [Model.sample(), imported("Sample.dmn"), imported("kie_sample.dmn")] do
+        x = XmlIndex.build(model)
+        assert x.text == Dmn.to_xml(model)
+        {header, root} = Dmn.document(model)
+        {body, _spans, _n} = Dmn.render_lines(root)
+        assert header <> Enum.join(body, "\n") <> "\n" == x.text
+      end
+    end
+
+    test "an imported file is indexed by the ids it carries: every node, requirement and type" do
+      for file <- ["Sample.dmn", "kie_sample.dmn"] do
+        m = imported(file)
+        x = XmlIndex.build(m)
+
+        for {id, n} <- m.nodes do
+          {from, _} = XmlView.range(x, {:node, id}) || flunk("#{file}: no range for node #{n.name}")
+          assert Enum.at(x.lines, from - 1) =~ ~s|id="#{id}"|
+        end
+
+        for {from_id, to_id, _} <- Model.edges_all(m) do
+          assert XmlView.range(x, {:edge, from_id, to_id}), "#{file}: no range for #{from_id} -> #{to_id}"
+        end
+
+        for {t, i} <- Enum.with_index(m.types) do
+          {from, _} = XmlView.range(x, {:type, [i]}) || flunk("#{file}: no range for type #{t.name}")
+          assert Enum.at(x.lines, from - 1) =~ ~s|name="#{t.name}"|
+
+          for {c, j} <- Enum.with_index(t.components) do
+            {from, _} = XmlView.range(x, {:type, [i, j]}) || flunk("#{file}: no range for #{t.name}.#{c.name}")
+            assert Enum.at(x.lines, from - 1) =~ ~s|name="#{c.name}"|
+          end
+        end
+      end
+    end
+
+    test "clicking inside an imported decision resolves to it" do
+      m = imported("Sample.dmn")
+      x = XmlIndex.build(m)
+      [{id, _} | _] = Enum.filter(m.nodes, fn {_, n} -> n.type == :decision end)
+      {from, to} = XmlView.range(x, {:node, id})
+      assert XmlView.key_at(x, from) == {:node, id}
+      # in the middle it is the decision itself, or a requirement written inside it that points at it
+      assert match?(
+               k when k == {:node, id} or (elem(k, 0) == :edge and elem(k, 2) == id),
+               XmlView.key_at(x, div(from + to, 2))
+             )
+    end
+
+    test "a text with a line break still counts every line" do
+      m = put_in(Model.sample().nodes["loan"].expr.result, "1 +\n 2")
+      x = XmlIndex.build(m)
+      assert length(x.lines) == length(String.split(String.trim_trailing(x.text, "\n"), "\n"))
+      {from, to} = XmlView.range(x, {:node, "loan"})
+      assert Enum.at(x.lines, from - 1) =~ "<decision"
+      assert Enum.at(x.lines, to - 1) == "  </decision>"
+    end
+
+    test "highlighting keeps the exact text of every line" do
+      m = put_in(Model.sample().nodes["loan"].expr.result, ~s|if a < b & c > "d" then 1|)
+
+      strip = fn h ->
+        h
+        |> String.replace(~r/<[^>]+>/, "")
+        |> String.replace("&lt;", "<")
+        |> String.replace("&gt;", ">")
+        |> String.replace("&quot;", "\"")
+        |> String.replace("&amp;", "&")
+      end
+
+      for l <- XmlIndex.build(m).lines, do: assert(strip.(XmlView.highlight(l)) == l)
+    end
+  end
+
+  describe "type constraints" do
+    alias DmnSpike.Constraint
+
+    test "visual forms are recognised only when they reproduce the text exactly" do
+      assert Constraint.parse(">= 0", :range) == {:cmp, ">=", "0"}
+      assert Constraint.parse("(0..20]", :range) == {:interval, "(", "0", "20", "]"}
+      assert Constraint.parse("120, 180, 240, 360", :enumeration) == {:list, ~w(120 180 240 360)}
+      assert Constraint.parse(~s|"Low", "Med, ium"|, :enumeration) == {:list, [~s|"Low"|, ~s|"Med, ium"|]}
+      assert Constraint.parse("5", :range) == :advanced
+      assert Constraint.parse(~s|> date("2020-01-01")|, :range) == :advanced
+      assert Constraint.parse("> 0 and < 100", :expression) == :advanced
+      assert Constraint.parse("]0..5[", :range) == :advanced
+    end
+
+    test "build writes canonical text that parses back to the same form" do
+      for form <- [{:cmp, "<=", "10"}, {:interval, "[", "0", "100", ")"}, {:list, ["1", "2"]}] do
+        assert Constraint.parse(Constraint.build(form), Constraint.kind(form)) == form
+      end
+    end
+
+    test "string values are quoted once" do
+      assert Constraint.literal("string", "Low") == ~s|"Low"|
+      assert Constraint.literal("string", ~s|"Low"|) == ~s|"Low"|
+      assert Constraint.literal("number", " 7 ") == "7"
+    end
+
+    test "names, references and usages" do
+      m = Model.sample()
+      assert DmnSpike.Types.name_error(m.types, [0, 0]) == nil
+      dup = %{m | types: DmnSpike.Types.update(m.types, [0, 1], &%{&1 | name: "Income"})}
+      assert DmnSpike.Types.name_error(dup.types, [0, 1]) =~ "already used"
+
+      assert DmnSpike.Types.name_error(%{m | types: DmnSpike.Types.update(m.types, [0], &%{&1 | name: " "})}.types, [0]) =~
+               "required"
+
+      assert DmnSpike.Types.ref_error(m, %{ref: "tNope"}) =~ "Unknown"
+      assert DmnSpike.Types.usages(m, "tRatio").nodes == ["Back End Ratio", "Front End Ratio"]
+      assert DmnSpike.Types.usages(m, "tApplicant").nodes == ["Applicant Data"]
+      assert DmnSpike.Types.base(m, %{ref: "tRatio"}) == "number"
+      assert DmnSpike.Types.fetch(m.types, [9]) == nil and DmnSpike.Types.fetch(m.types, [0, 9]) == nil
+    end
+  end
+
   describe "decision tables" do
     defp table_model(policy, rules) do
       m = Model.sample()
@@ -247,6 +448,7 @@ defmodule DmnSpikeTest do
       r = risk(Model.sample())
       assert r.value == "Medium"
       assert r.table.matched == [false, true, true]
+      assert r.table.chosen == [1]
       assert r.errors == []
     end
 
@@ -284,6 +486,60 @@ defmodule DmnSpikeTest do
     test "syntax errors are reported per cell" do
       r = risk(table_model("FIRST", [rule("[1..", ~s|"a"|), rule("-", "1 +")]))
       assert %{"e-0-0" => {:error, _}, "o-1-0" => {:error, _}} = r.table.errors
+    end
+
+    test "an edge can arrive at a chosen side of its target" do
+      m = Model.sample()
+      {:ok, plain} = Model.connect(m, "app", "loan")
+      {:ok, m} = Model.connect(m, "app", "loan", :left)
+      assert plain.anchors == %{} and m.anchors == %{{"app", "loan"} => :left}
+
+      {x1, y1, x2, y2} = Svg.endpoints(m, "app", "loan")
+      loan = m.nodes["loan"]
+      assert {x2, y2} == {loan.x * 1.0, loan.y + loan.h / 2}
+      assert {x1, y1} == Svg.border(m.nodes["app"], {x2, y2})
+      assert Svg.endpoints(plain, "app", "loan") != {x1, y1, x2, y2}
+
+      assert Model.delete_edge(m, length(m.edges) - 1).anchors == %{}
+      assert Model.delete_node(m, "loan").anchors == %{}
+      assert {:error, _} = Model.connect(m, "app", "loan", :left)
+    end
+
+    test "the nearest side is the one whose anchor is closest" do
+      n = %{x: 100, y: 100, w: 150, h: 60}
+      assert Svg.nearest_side(n, {170, 90}) == :top
+      assert Svg.nearest_side(n, {260, 135}) == :right
+      assert Svg.nearest_side(n, {170, 200}) == :bottom
+      assert Svg.nearest_side(n, {60, 120}) == :left
+    end
+
+    test "inserting at a position shifts the rest and keeps the rules aligned" do
+      m =
+        Model.sample()
+        |> Model.insert_rule("risk", 1)
+        |> Model.insert_input("risk", 0)
+        |> Model.insert_output("risk", 1)
+
+      t = m.nodes["risk"].expr
+      assert Enum.map(t.rules, & &1.outs) == [[~s|"Low"|, ""], ["", ""], [~s|"Medium"|, ""], [~s|"High"|, ""]]
+      assert Enum.map(t.rules, &hd(&1.entries)) == ["-", "-", "-", "-"]
+      assert hd(t.inputs).expr == "" and Enum.at(t.inputs, 1).expr == "Front End Ratio"
+      assert Enum.all?(t.rules, &(length(&1.entries) == 3 and length(&1.outs) == 2))
+    end
+
+    test "column types are set per column and survive the XML round trip" do
+      m =
+        Model.sample()
+        |> Model.set_col_type("risk", :input, 0, "number")
+        |> Model.set_col_type("risk", :input, 1, nil)
+        |> Model.set_col_type("risk", :output, 0, "string")
+
+      xml = DmnSpike.Dmn.to_xml(m)
+      assert xml =~ ~s|<inputExpression typeRef="number">| and xml =~ ~s|typeRef="string"|
+      {:ok, m2, _} = DmnSpike.Dmn.from_xml(xml)
+      t = m2.nodes["risk"].expr
+      assert hd(t.inputs).type_ref == "number" and Enum.at(t.inputs, 1).type_ref == nil
+      assert hd(t.outputs).type_ref == "string"
     end
 
     test "adding and removing rules and inputs keeps entries aligned" do

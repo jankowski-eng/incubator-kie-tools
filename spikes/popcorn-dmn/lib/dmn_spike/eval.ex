@@ -100,7 +100,17 @@ defmodule DmnSpike.Eval do
     names = Enum.map(t.outputs, & &1.name)
     matched = for {r, i} <- Enum.with_index(rules), r.matched, do: {i, rule_value(names, Enum.map(r.outs, &value_of/1))}
     {value, message} = hit(t.hit_policy, matched)
-    %{value: value, cells: [], table: %{matched: Enum.map(rules, & &1.matched), errors: errors, message: message}}
+    # the rules that make up the result: FIRST uses only the earliest match, the other policies every match
+    chosen =
+      if t.hit_policy == "FIRST",
+        do: Enum.take(Enum.map(matched, &elem(&1, 0)), 1),
+        else: Enum.map(matched, &elem(&1, 0))
+
+    %{
+      value: value,
+      cells: [],
+      table: %{matched: Enum.map(rules, & &1.matched), chosen: chosen, errors: errors, message: message}
+    }
   end
 
   # one output column gives its value, several give a context keyed by the output names

@@ -32,13 +32,21 @@ ok("starts fitted to the diagram", fit.length === 4 && fit[2] >= 820, fit.join("
 const box = await page.locator("#drd").boundingBox();
 const px = box.x + box.width * 0.25,
   py = box.y + box.height * 0.25;
-// the svg keeps the viewBox aspect ratio (xMidYMid meet), so screen px per unit is the smaller of the two scales
+// the diagram point under (px, py); the canvas fills the window, so the viewBox can be letterboxed in it
+const under = () =>
+  page.evaluate(
+    ([x, y]) => {
+      const svg = document.querySelector("#drd"),
+        p = svg.createSVGPoint();
+      [p.x, p.y] = [x, y];
+      const q = p.matrixTransform(svg.getScreenCTM().inverse());
+      return [q.x, q.y];
+    },
+    [px, py]
+  );
+// the svg keeps the viewBox aspect ratio (meet): screen px per diagram unit is the smaller of the two scales
 const unit = (v) => Math.min(box.width / v[2], box.height / v[3]);
-const frac = (v) => [
-  (px - box.x - (box.width - unit(v) * v[2]) / 2) / unit(v) + v[0],
-  (py - box.y - (box.height - unit(v) * v[3]) / 2) / unit(v) + v[1],
-];
-const before = frac(fit);
+const before = await under();
 await page.mouse.move(px, py);
 for (let i = 0; i < 5; i++) {
   await page.mouse.wheel(0, -120);
@@ -46,7 +54,7 @@ for (let i = 0; i < 5; i++) {
 }
 await settle(300);
 const zoomed = await vb();
-const after = frac(zoomed);
+const after = await under();
 ok("wheel up zooms in", zoomed[2] < fit[2] * 0.7, `${fit[2]} -> ${zoomed[2].toFixed(0)}`);
 ok(
   "zoom keeps the point under the cursor fixed",

@@ -22,6 +22,13 @@ const ok = (name, cond, extra = "") => {
 };
 const text = (sel) => page.locator(sel).first().textContent();
 const settle = (ms = 500) => page.waitForTimeout(ms);
+// the dock and the import summary float over the canvas and can cover nodes: close them before clicking one
+const clickNode = async (sel, opts) => {
+  if (await page.locator("#report .x").isVisible()) await page.locator("#report .x").click();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await page.locator(sel).click(opts);
+};
 const count = (sel) => page.locator(sel).count();
 
 await page.goto("http://localhost:4000");
@@ -53,7 +60,11 @@ const tagCounts = (xml) => {
   return counts;
 };
 const original = fs.readFileSync(SAMPLE, "utf8");
-const [dl0] = await Promise.all([page.waitForEvent("download"), page.locator('[data-click="export"]').click()]);
+const exportDmn = async () => {
+  await page.getByRole("button", { name: /File/ }).click();
+  await page.getByRole("menuitem", { name: "Export DMN" }).click();
+};
+const [dl0] = await Promise.all([page.waitForEvent("download"), exportDmn()]);
 await dl0.saveAs(`${OUT}/real-unedited.dmn`);
 const unedited = fs.readFileSync(`${OUT}/real-unedited.dmn`, "utf8");
 ok(
@@ -103,7 +114,7 @@ ok(
 );
 
 const setInput = async (name, value) => {
-  await page.locator(`#scene [data-id="${ids[name]}"]`).click({ force: true });
+  await clickNode(`#scene [data-id="${ids[name]}"]`, { force: true });
   await settle(350);
   await page.locator(`textarea[data-cell="${ids[name]}:0"]`).fill(value);
   await settle(450);
@@ -137,11 +148,11 @@ ok(
   (await verdict()).startsWith('{Qualification: "Not Qualified"'),
   await verdict()
 );
-await page.locator(`#scene [data-id="${ids["Loan Pre-Qualification"]}"]`).click({ force: true });
+await clickNode(`#scene [data-id="${ids["Loan Pre-Qualification"]}"]`, { force: true });
 await settle(500);
 ok(
   "the table highlights the matching rule (rule 2)",
-  (await page.locator("tr.rule.hit").count()) === 1 && (await page.locator("tr.rule.hit td.rn").textContent()) === "2"
+  (await page.locator("tr.rule.hit").count()) === 1 && (await page.locator("tr.rule.hit td.rn").evaluate((e) => e.firstChild.textContent)) === "2"
 );
 ok(
   "two output columns with names",
@@ -158,7 +169,7 @@ await setInput("Credit Score", "{FICO: 580}");
 ok("poor credit score wins (first matching rule)", (await verdict()).includes("Credit Score too low"), await verdict());
 
 // BKM parameters are editable
-await page.locator(`#scene [data-id="${ids.PITI}"]`).click({ force: true });
+await clickNode(`#scene [data-id="${ids.PITI}"]`, { force: true });
 await settle(500);
 ok(
   "BKM parameters shown in the panel",
@@ -171,7 +182,7 @@ await page.locator("input[data-op=nparams]").fill("pmt, tax, insurance, income")
 await settle(400);
 
 // after editing, everything the editor does not touch is still in the saved file
-const [dlEdited] = await Promise.all([page.waitForEvent("download"), page.locator('[data-click="export"]').click()]);
+const [dlEdited] = await Promise.all([page.waitForEvent("download"), exportDmn()]);
 await dlEdited.saveAs(`${OUT}/real-edited.dmn`);
 const edited = fs.readFileSync(`${OUT}/real-edited.dmn`, "utf8");
 const before = tagCounts(original);
@@ -190,7 +201,10 @@ ok(
 );
 
 // export the whole thing and bring it back
-const [dl] = await Promise.all([page.waitForEvent("download"), page.locator('[data-click="export"]').click()]);
+const [dl] = await Promise.all([page.waitForEvent("download"), (async () => {
+    await page.getByRole("button", { name: /File/ }).click();
+    await page.getByRole("menuitem", { name: "Export DMN" }).click();
+  })()]);
 await dl.saveAs(`${OUT}/real-export.dmn`);
 await page.locator("#file").setInputFiles(`${OUT}/real-export.dmn`);
 await settle(1200);

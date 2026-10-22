@@ -16,7 +16,8 @@ defmodule DmnSpike.Model do
     "prod" => "tRequested"
   }
 
-  defstruct nodes: %{}, edges: [], links: [], types: [], next: 1, doc: nil
+  # `anchors` maps `{from, to}` to the side (:top | :right | :bottom | :left) of `to` the edge arrives at
+  defstruct nodes: %{}, edges: [], links: [], types: [], next: 1, doc: nil, anchors: %{}
 
   def sample do
     nodes =
@@ -83,8 +84,8 @@ defmodule DmnSpike.Model do
     %{
       kind: :table,
       hit_policy: "FIRST",
-      inputs: [%{expr: "Front End Ratio"}, %{expr: "Back End Ratio"}],
-      outputs: [%{name: ""}],
+      inputs: [%{expr: "Front End Ratio", type_ref: "tRatio"}, %{expr: "Back End Ratio", type_ref: "tRatio"}],
+      outputs: [%{name: "", type_ref: "tCategory"}],
       note_title: nil,
       rules: [
         %{entries: ["< 20", "< 30"], outs: [~s|"Low"|], note: ""},
@@ -130,8 +131,8 @@ defmodule DmnSpike.Model do
     do: %{
       kind: :table,
       hit_policy: "UNIQUE",
-      inputs: [%{expr: ""}],
-      outputs: [%{name: ""}],
+      inputs: [%{expr: "", type_ref: nil}],
+      outputs: [%{name: "", type_ref: nil}],
       note_title: nil,
       rules: [%{entries: ["-"], outs: [""], note: ""}]
     }
@@ -204,29 +205,42 @@ defmodule DmnSpike.Model do
 
   def set_hit_policy(%__MODULE__{} = m, id, hp) when hp in @hit_policies, do: put_in(m.nodes[id].expr.hit_policy, hp)
 
-  def add_rule(%__MODULE__{} = m, id) do
+  # `at` is the index the new rule/column takes; the ones from there on move one place along
+  def insert_rule(%__MODULE__{} = m, id, at) do
+    update_in(m.nodes[id].expr, fn t ->
+      rule = %{entries: Enum.map(t.inputs, fn _ -> "-" end), outs: Enum.map(t.outputs, fn _ -> "" end), note: ""}
+      %{t | rules: List.insert_at(t.rules, at, rule)}
+    end)
+  end
+
+  def insert_input(%__MODULE__{} = m, id, at) do
     update_in(m.nodes[id].expr, fn t ->
       %{
         t
-        | rules:
-            t.rules ++
-              [%{entries: Enum.map(t.inputs, fn _ -> "-" end), outs: Enum.map(t.outputs, fn _ -> "" end), note: ""}]
+        | inputs: List.insert_at(t.inputs, at, %{expr: "", type_ref: nil}),
+          rules: Enum.map(t.rules, &%{&1 | entries: List.insert_at(&1.entries, at, "-")})
       }
     end)
   end
+
+  def insert_output(%__MODULE__{} = m, id, at) do
+    update_in(m.nodes[id].expr, fn t ->
+      out = %{name: "output #{length(t.outputs) + 1}", type_ref: nil}
+
+      %{
+        t
+        | outputs: List.insert_at(t.outputs, at, out),
+          rules: Enum.map(t.rules, &%{&1 | outs: List.insert_at(&1.outs, at, "")})
+      }
+    end)
+  end
+
+  def add_rule(%__MODULE__{} = m, id), do: insert_rule(m, id, length(m.nodes[id].expr.rules))
+  def add_input(%__MODULE__{} = m, id), do: insert_input(m, id, length(m.nodes[id].expr.inputs))
+  def add_output(%__MODULE__{} = m, id), do: insert_output(m, id, length(m.nodes[id].expr.outputs))
 
   def del_rule(%__MODULE__{} = m, id, r),
     do: update_in(m.nodes[id].expr, fn t -> %{t | rules: List.delete_at(t.rules, r)} end)
-
-  def add_output(%__MODULE__{} = m, id) do
-    update_in(m.nodes[id].expr, fn t ->
-      %{
-        t
-        | outputs: t.outputs ++ [%{name: "output #{length(t.outputs) + 1}"}],
-          rules: Enum.map(t.rules, &%{&1 | outs: &1.outs ++ [""]})
-      }
-    end)
-  end
 
   def del_output(%__MODULE__{} = m, id, k) do
     update_in(m.nodes[id].expr, fn t ->
@@ -240,12 +254,6 @@ defmodule DmnSpike.Model do
     end)
   end
 
-  def add_input(%__MODULE__{} = m, id) do
-    update_in(m.nodes[id].expr, fn t ->
-      %{t | inputs: t.inputs ++ [%{expr: ""}], rules: Enum.map(t.rules, &%{&1 | entries: &1.entries ++ ["-"]})}
-    end)
-  end
-
   def del_input(%__MODULE__{} = m, id, i) do
     update_in(m.nodes[id].expr, fn t ->
       %{
@@ -255,6 +263,15 @@ defmodule DmnSpike.Model do
       }
     end)
   end
+
+  @doc "Sets the typeRef of an input (`:input`) or output (`:output`) column."
+  def set_col_type(%__MODULE__{} = m, id, :input, i, ref),
+    do:
+      update_in(m.nodes[id].expr, fn t -> %{t | inputs: List.update_at(t.inputs, i, &Map.put(&1, :type_ref, ref))} end)
+
+  def set_col_type(%__MODULE__{} = m, id, :output, k, ref),
+    do:
+      update_in(m.nodes[id].expr, fn t -> %{t | outputs: List.update_at(t.outputs, k, &Map.put(&1, :type_ref, ref))} end)
 
   def edges_of(%__MODULE__{} = m, id) do
     m |> edges_all() |> Enum.with_index() |> Enum.filter(fn {{a, b, _}, _} -> a == id or b == id end)
@@ -374,14 +391,22 @@ defmodule DmnSpike.Model do
       m
       | nodes: Map.delete(m.nodes, id),
         edges: Enum.reject(m.edges, touches),
-        links: Enum.reject(m.links, touches)
+        links: Enum.reject(m.links, touches),
+        anchors: Map.reject(m.anchors, fn {{a, b}, _} -> a == id or b == id end)
     }
   end
 
   # `i` indexes edges_all/1: requirements first, then links
-  def delete_edge(%__MODULE__{edges: edges} = m, i) when i < length(edges), do: %{m | edges: List.delete_at(edges, i)}
+  def delete_edge(%__MODULE__{} = m, i) do
+    case Enum.at(edges_all(m), i) do
+      {a, b, _} -> %{drop_edge(m, i) | anchors: Map.delete(m.anchors, {a, b})}
+      nil -> m
+    end
+  end
 
-  def delete_edge(%__MODULE__{edges: edges, links: links} = m, i),
+  defp drop_edge(%__MODULE__{edges: edges} = m, i) when i < length(edges), do: %{m | edges: List.delete_at(edges, i)}
+
+  defp drop_edge(%__MODULE__{edges: edges, links: links} = m, i),
     do: %{m | links: List.delete_at(links, i - length(edges))}
 
   def rename(%__MODULE__{} = m, id, name), do: put_in(m.nodes[id].name, name)
@@ -405,8 +430,18 @@ defmodule DmnSpike.Model do
   @doc "Everything joined to `id` by a link (association, authority requirement), as `{id, name, kind}`."
   def links_of(%__MODULE__{} = m, id), do: incoming(m, id, m.links) ++ outgoing(m, id, m.links)
 
-  @doc "DMN requirement rules: input/decision -> decision (information), bkm -> decision/bkm (knowledge)."
-  def connect(%__MODULE__{} = m, from, to) do
+  @doc """
+  Connects `from` to `to` by the rules of DMN (requirements, authority requirements, associations). `side` is the
+  side of `to` the edge should arrive at; it is remembered in `anchors` once the connection is accepted.
+  """
+  def connect(%__MODULE__{} = m, from, to, side \\ nil) do
+    with {:ok, m2} <- check_connect(m, from, to) do
+      anchors = if side in [:top, :right, :bottom, :left], do: Map.put(m2.anchors, {from, to}, side), else: m2.anchors
+      {:ok, %{m2 | anchors: anchors}}
+    end
+  end
+
+  defp check_connect(%__MODULE__{} = m, from, to) do
     a = m.nodes[from]
     b = m.nodes[to]
 

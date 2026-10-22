@@ -6,7 +6,7 @@ const OUT = process.env.OUT ?? ".";
 const { chromium } = require("playwright-core");
 const FIXTURE = new URL("../test/fixtures/kie_sample.dmn", import.meta.url).pathname;
 const browser = await chromium.launch({ channel: "chrome", headless: true });
-const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
+const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
 let fails = 0;
 const ok = (name, cond, extra = "") => {
   if (!cond) fails++;
@@ -15,6 +15,15 @@ const ok = (name, cond, extra = "") => {
 const settle = (ms = 400) => page.waitForTimeout(ms);
 const count = (sel) => page.locator(sel).count();
 const text = (sel) => page.locator(sel).first().textContent();
+const xmlText = async () => {
+  await page.locator(".xmlbtn").click();
+  await page.waitForFunction(() => document.querySelectorAll("#xcode .xc").length > 0);
+  await settle(400);
+  const t = await page.evaluate(() => [...document.querySelectorAll("#xcode .xc")].map((c) => c.textContent).join("\n") + "\n");
+  await page.locator(".xmlbtn").click();
+  await settle(500);
+  return t;
+};
 
 await page.goto("http://localhost:4000");
 await page.waitForFunction(
@@ -25,29 +34,33 @@ await page.waitForFunction(
 
 ok(
   "the app fits the window (no page scroll)",
-  (await page.evaluate(() => document.documentElement.scrollHeight)) <= 720
+  (await page.evaluate(() => document.documentElement.scrollHeight)) <= 900
 );
+// the canvas fills the area under the top bar and the dock floats over its bottom edge, so both are in view
 const stage = await page.locator(".stage").boundingBox();
 const panel = await page.locator("#panel table").first().boundingBox();
-ok("canvas and the editing table are visible together", stage.y + stage.height < 720 && panel.y < 720, `${panel.y}`);
+ok("the canvas fills the window under the top bar", stage.x === 0 && stage.width >= 1279 && stage.y + stage.height >= 899, JSON.stringify(stage));
+ok("canvas and the editing table are visible together", panel.y < 900 && panel.y > stage.y, `${panel.y}`);
 
 // selecting a node shows its expression in the dock without scrolling
 await page.locator('#scene g[data-id="risk"] .shape').click();
 await settle();
-ok("selecting a node shows its table in view", (await page.locator("table.dt").first().boundingBox()).y < 720);
+ok("selecting a node shows its table in view", (await page.locator("table.dt").first().boundingBox()).y < 900);
 
-// splitter resizes the dock and remembers it
-const dock0 = (await page.locator(".dock").boundingBox()).height;
+// the grip on the dock's top edge resizes it and the height is remembered
+const dock0 = (await page.locator("#dock").boundingBox()).height;
 const sp = await page.locator("#splitter").boundingBox();
 await page.mouse.move(sp.x + sp.width / 2, sp.y + 7);
 await page.mouse.down();
 await page.mouse.move(sp.x + sp.width / 2, sp.y - 120, { steps: 5 });
 await page.mouse.up();
-const dock1 = (await page.locator(".dock").boundingBox()).height;
-ok("dragging the splitter enlarges the dock", dock1 > dock0 + 80, `${dock0} -> ${dock1}`);
+await settle(300);
+const dock1 = (await page.locator("#dock").boundingBox()).height;
+ok("dragging the grip enlarges the dock", dock1 > dock0 + 80, `${dock0} -> ${dock1}`);
 await page.reload();
 await page.waitForFunction(() => document.querySelector("#panel table"), null, { timeout: 90000 });
-ok("dock height survives a reload", Math.abs((await page.locator(".dock").boundingBox()).height - dock1) < 3);
+await settle(600);
+ok("dock height survives a reload", Math.abs((await page.locator("#dock").boundingBox()).height - dock1) < 3);
 
 // help popover
 await page.locator("#help-btn").click();
@@ -55,14 +68,16 @@ ok("help popover opens", await page.locator("#help").isVisible());
 await page.keyboard.press("Escape");
 ok("Escape closes it", await page.locator("#help").isHidden());
 
-// rename by double-click and F2
+// rename: double-click edits the name in place on the canvas; F2 goes to the name field of the panel
 await page.locator('#scene g[data-id="front"] .shape').dblclick();
-await settle(800);
+await settle(600);
 ok(
-  "double-click focuses the name field",
-  await page.evaluate(() => document.activeElement?.classList.contains("nname")),
+  "double-click opens an in-place name field on the node",
+  await page.evaluate(() => document.activeElement?.classList.contains("rename")),
   await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))
 );
+await page.keyboard.press("Enter");
+await settle(300);
 await page.locator("#drd").click({ position: { x: 5, y: 200 } });
 await page.locator('#scene g[data-id="front"] .shape').click();
 await settle();
@@ -86,6 +101,14 @@ await settle();
 ok("a selected decision offers 5 things to create", (await count("#pad-front [data-create]")) === 5);
 const nn = await count("#scene g[data-id]"),
   ne = await count("#scene line.vis");
+// a node at the right edge gets its pad on its left side, so it is never cut off by the window
+await page.locator('#scene g[data-id="piti"] .shape').click({ force: true });
+await settle(400);
+const padBox = await page.locator('#pad-piti .pad').boundingBox();
+const stageBox = await page.locator(".stage").boundingBox();
+ok("the pad stays inside the canvas", padBox.x >= stageBox.x && padBox.x + padBox.width <= stageBox.x + stageBox.width, JSON.stringify(padBox));
+await page.locator('#scene g[data-id="front"] .shape').click({ force: true });
+await settle(400);
 await page.locator('#pad-front [data-create="input"]').click();
 await settle(800);
 ok(
@@ -152,14 +175,8 @@ ok(
   after.width > before.width + 30 && after.height > before.height + 15,
   `${before.width} -> ${after.width}`
 );
-await page.locator('[data-click="tab:xml"]').click();
-await settle(500);
-ok(
-  "the XML has the annotation and association",
-  (await text("#xml")).includes("<textAnnotation") && (await text("#xml")).includes("<association")
-);
-await page.locator('[data-click="tab:editor"]').click();
-await settle();
+const xmlA = await xmlText();
+ok("the XML has the annotation and association", xmlA.includes("<textAnnotation") && xmlA.includes("<association"));
 // create, typing and resize are three undo steps
 for (let i = 0; i < 3; i++) {
   await page.locator("[data-click=undo]").click();
@@ -214,20 +231,16 @@ const hh = await page.locator('#scene g[data-id="app"] .handle').boundingBox();
 const tt = await page.locator(`#scene g[data-id="${sid}"] .shape`).boundingBox();
 await page.mouse.move(hh.x + hh.width / 2, hh.y + hh.height / 2);
 await page.mouse.down();
-await page.mouse.move(tt.x + tt.width / 2, tt.y + tt.height / 2, { steps: 6 });
+// the middle of the new node can sit under the floating zoom controls: aim at its lower left part
+await page.mouse.move(tt.x + 12, tt.y + tt.height - 12, { steps: 6 });
 await page.mouse.up();
 await settle(600);
 ok("an input can be joined to the source as its authority", (await count("#scene line.vis")) === se + 2);
-await page.locator('[data-click="tab:xml"]').click();
-await settle(500);
+const xmlS = await xmlText();
 ok(
   "the XML has the source and both authority requirements",
-  (await text("#xml")).includes("<knowledgeSource") &&
-    (await text("#xml")).includes("<requiredAuthority") &&
-    (await text("#xml")).includes('<requiredInput href="#app"/>')
+  xmlS.includes("<knowledgeSource") && xmlS.includes("<requiredAuthority") && xmlS.includes('<requiredInput href="#app"/>')
 );
-await page.locator('[data-click="tab:editor"]').click();
-await settle();
 await page.dragAndDrop('#palette [data-kind="source"]', "#drd", { targetPosition: { x: 120, y: 120 } });
 await settle(600);
 ok("a source can be dragged in from the palette", (await count("#scene g.source")) === 2);
@@ -309,9 +322,19 @@ const covered = Object.keys(pos0).filter(
 );
 const band = await page.locator(`#scene g[data-id="${gid}"] .band`).boundingBox();
 const k = (await page.locator("#drd").evaluate((el) => el.getScreenCTM().a)) || 1;
-await page.mouse.move(band.x + 60, band.y + 12);
+// the group is drawn behind its elements, so grab it at a point of the band that nothing covers
+const grabX = await page.evaluate(
+  ([bx, by, bw, id]) => {
+    for (let dx = 20; dx < bw - 10; dx += 10) {
+      if (document.elementFromPoint(bx + dx, by + 12)?.closest("[data-id]")?.dataset.id === id) return bx + dx;
+    }
+    return null;
+  },
+  [band.x, band.y, band.width, gid]
+);
+await page.mouse.move(grabX, band.y + 12);
 await page.mouse.down();
-await page.mouse.move(band.x + 60 - 40 * k, band.y + 12 + 10 * k, { steps: 5 });
+await page.mouse.move(grabX - 40 * k, band.y + 12 + 10 * k, { steps: 5 });
 await page.mouse.up();
 await settle(500);
 const pos1 = await origins();
@@ -408,14 +431,10 @@ ok(
   (await count('.node.sel[data-id="front"]')) === 1 &&
     (await page.locator('textarea[data-op="ndesc"]').inputValue()) === "Monthly housing cost as a share of income."
 );
-await page.locator('[data-click="tab:xml"]').click();
-await settle(500);
 ok(
   "the description is in the XML",
-  (await text("#xml")).includes("<description>Monthly housing cost as a share of income.</description>")
+  (await xmlText()).includes("<description>Monthly housing cost as a share of income.</description>")
 );
-await page.locator('[data-click="tab:editor"]').click();
-await settle();
 await page.locator("[data-click=undo]").click();
 await settle(500);
 ok("undo removes it", (await count("#scene g[data-id=front] .info")) === 0);
@@ -442,7 +461,8 @@ ok("Shift+Enter goes back up", (await page.evaluate(() => document.activeElement
 await page.locator("#file").setInputFiles(FIXTURE);
 await settle(900);
 const rep = await page.locator("#report").boundingBox();
-ok("import summary is compact", rep.height < 80, `${rep.height}`);
+// a floating card in the corner (the summary used to span the whole window): a few lines, details collapsed
+ok("import summary is compact", rep.height < 190 && rep.width <= 30 * 16 + 2, `${rep.width}x${rep.height}`);
 ok("details are collapsed", (await page.locator("#report details").getAttribute("open")) === null);
 await page.locator("#report details summary").click();
 ok("details open on demand", await page.locator("#report ul.dropped").first().isVisible());

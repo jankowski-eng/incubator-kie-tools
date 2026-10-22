@@ -5,7 +5,8 @@ defmodule DmnSpike.Panel do
 
   def render(m, id, results, dock \\ "expr")
 
-  def render(_m, nil, _results, _dock), do: ~s|<p class="hint">Click a node to edit its expression.</p>|
+  # nothing selected: the panel is empty and hidden (`#panel:empty`)
+  def render(_m, nil, _results, _dock), do: ""
 
   def render(%Model{} = m, id, results, dock) do
     node = m.nodes[id]
@@ -58,7 +59,7 @@ defmodule DmnSpike.Panel do
 
         true ->
           case Model.kind(node) do
-            :table -> table(node, results[id])
+            :table -> table(m, node, results[id])
             :context -> context(node, results[id])
             :raw -> raw(node)
           end
@@ -123,11 +124,15 @@ defmodule DmnSpike.Panel do
 
   # --- decision table ----------------------------------------------------------------
 
-  defp table(node, result) do
+  # a zero-width space keeps an empty (or newline-ending) mirror line as tall as a text line
+  @zwsp "\u200b"
+
+  defp table(m, node, result) do
     t = node.expr
     id = node.id
     n = length(t.inputs)
     k = length(t.outputs)
+    ni = max(n, 1)
     errs = result.table.errors
 
     hp =
@@ -136,44 +141,97 @@ defmodule DmnSpike.Panel do
       end
 
     inputs =
-      for {inp, i} <- Enum.with_index(t.inputs) do
-        ~s|<th class="in">#{dt_ed(id, "h-#{i}", inp.expr, errs)}<button data-click="dt-del-input:#{id}:#{i}" title="Delete input column">✕</button></th>|
+      if n == 0 do
+        [~s|<th class="in empty"><button data-click="dt-ins-input:#{id}:0">+ Add input</button></th>|]
+      else
+        for {inp, i} <- Enum.with_index(t.inputs) do
+          [
+            ~s|<th class="in">|,
+            col_actions("input", id, i, true),
+            dt_ed(id, "h-#{i}", inp.expr, errs),
+            type_select(m, id, "h-#{i}", Map.get(inp, :type_ref)),
+            "</th>"
+          ]
+        end
       end
 
     outputs =
       for {o, j} <- Enum.with_index(t.outputs) do
-        if k == 1 do
-          ~s|<th class="outh single">#{Fmt.esc(node.name)}</th>|
-        else
-          ~s|<th class="outh">#{dt_ed(id, "n-#{j}", o.name, errs)}<button data-click="dt-del-output:#{id}:#{j}" title="Delete output column">✕</button></th>|
-        end
+        name =
+          if k == 1, do: ~s|<div class="outname">#{Fmt.esc(node.name)}</div>|, else: dt_ed(id, "n-#{j}", o.name, errs)
+
+        [
+          ~s|<th class="outh">|,
+          col_actions("output", id, j, k > 1),
+          name,
+          type_select(m, id, "n-#{j}", Map.get(o, :type_ref)),
+          "</th>"
+        ]
       end
 
     rules =
       for {rule, r} <- Enum.with_index(t.rules) do
-        entries = for {e, i} <- Enum.with_index(rule.entries), do: ~s|<td>#{dt_ed(id, "e-#{r}-#{i}", e, errs)}</td>|
+        entries =
+          if n == 0,
+            do: [~s|<td class="empty"></td>|],
+            else: for({e, i} <- Enum.with_index(rule.entries), do: ~s|<td>#{dt_ed(id, "e-#{r}-#{i}", e, errs)}</td>|)
 
         outs =
           for {o, j} <- Enum.with_index(rule.outs), do: ~s|<td class="out">#{dt_ed(id, "o-#{r}-#{j}", o, errs)}</td>|
 
+        note = Map.get(rule, :note, "")
+
         [
-          ~s|<tr id="dr-#{id}-#{r}" class="#{rule_class(result, r)}"><td class="rn">#{r + 1}</td>|,
+          ~s|<tr id="dr-#{id}-#{r}" class="#{rule_class(result, r)}"><td class="rn">#{r + 1}|,
+          ~s|<button class="ins up rowact" data-click="dt-ins-rule:#{id}:#{r}" title="Insert rule above" aria-label="Insert rule above">+</button>|,
+          ~s|<button class="ins down rowact" data-click="dt-ins-rule:#{id}:#{r + 1}" title="Insert rule below" aria-label="Insert rule below">+</button></td>|,
           entries,
           outs,
-          ~s|<td class="note"><input data-op="dtnote" data-id="#{id}" data-path="#{r}" value="#{Fmt.esc(Map.get(rule, :note, ""))}" spellcheck="false"/></td>|,
-          ~s|<td class="rm"><button data-click="dt-del-rule:#{id}:#{r}" title="Delete rule">✕</button></td></tr>|
+          ~s|<td class="note"><div class="ed"><pre class="hl" id="note-#{id}-#{r}">#{Fmt.esc(note)}#{@zwsp}</pre>|,
+          ~s|<textarea data-op="dtnote" data-id="#{id}" data-path="#{r}" rows="1" spellcheck="false" autocomplete="off">#{Fmt.esc(note)}</textarea></div></td>|,
+          ~s|<td class="rm"><button class="del rowact" data-click="dt-del-rule:#{id}:#{r}" title="Delete rule" aria-label="Delete rule">✕</button></td></tr>|
         ]
       end
 
+    no_rules =
+      if t.rules == [],
+        do: [
+          ~s|<tr><td class="norules" colspan="#{ni + k + 3}"><button data-click="dt-ins-rule:#{id}:0">+ Add rule</button></td></tr>|
+        ],
+        else: []
+
     IO.iodata_to_binary([
       ~s|<table class="boxed dt"><thead><tr><th class="hp" rowspan="2"><select data-op="dthp" data-id="#{id}" title="Hit policy">#{hp}</select></th>|,
-      ~s|<th colspan="#{max(n, 1)}">Input</th><th colspan="#{k}">Output</th><th rowspan="2" class="noteh">#{Fmt.esc(Map.get(t, :note_title) || "Annotation")}</th><th rowspan="2"></th></tr>|,
+      ~s|<th colspan="#{ni}">Input</th><th colspan="#{k}">Output</th><th rowspan="2" class="noteh">#{Fmt.esc(Map.get(t, :note_title) || "Annotation")}</th><th rowspan="2"></th></tr>|,
       ~s|<tr>#{inputs}#{outputs}</tr></thead><tbody>|,
       rules,
-      ~s|</tbody><tfoot><tr><td colspan="#{n + k + 3}"><button data-click="dt-add-rule:#{id}">+ rule</button> |,
-      ~s|<button data-click="dt-add-input:#{id}">+ input</button> <button data-click="dt-add-output:#{id}">+ output</button> |,
-      ~s|<span class="dtv" id="dtv-#{id}">#{table_summary(result)}</span></td></tr></tfoot></table>|
+      no_rules,
+      ~s|</tbody><tfoot><tr><td colspan="#{ni + k + 3}"><span class="dtv" id="dtv-#{id}">#{table_summary(result)}</span></td></tr></tfoot></table>|
     ])
+  end
+
+  # insert-left/right circles on the header's borders and a delete button in its corner; CSS shows them on hover
+  defp col_actions(kind, id, i, deletable?) do
+    [
+      ~s|<button class="ins left colact" data-click="dt-ins-#{kind}:#{id}:#{i}" title="Insert #{kind} on the left" aria-label="Insert #{kind} on the left">+</button>|,
+      ~s|<button class="ins right colact" data-click="dt-ins-#{kind}:#{id}:#{i + 1}" title="Insert #{kind} on the right" aria-label="Insert #{kind} on the right">+</button>|,
+      if(deletable?,
+        do:
+          ~s|<button class="del colact" data-click="dt-del-#{kind}:#{id}:#{i}" title="Delete #{kind} column" aria-label="Delete #{kind} column">✕</button>|,
+        else: ""
+      )
+    ]
+  end
+
+  defp type_select(m, id, path, current),
+    do:
+      ~s|<select class="coltype" data-op="dttype" data-id="#{id}" data-path="#{path}" title="Type">#{type_options(m, current)}</select>|
+
+  def type_options(%Model{} = m, current) do
+    for t <- [""] ++ DmnSpike.Types.builtins() ++ Enum.map(m.types, & &1.name), into: "" do
+      sel = if t == (current || ""), do: " selected", else: ""
+      ~s|<option value="#{Fmt.esc(t)}"#{sel}>#{if t == "", do: "&lt;Undefined&gt;", else: Fmt.esc(t)}</option>|
+    end
   end
 
   defp dt_ed(id, path, text, errs) do
@@ -181,7 +239,14 @@ defmodule DmnSpike.Panel do
       ~s|<textarea data-op="dtcell" data-id="#{id}" data-path="#{path}" rows="1" spellcheck="false" autocomplete="off">#{Fmt.esc(text)}</textarea></div>|
   end
 
-  defp rule_class(result, r), do: if(Enum.at(result.table.matched, r), do: "rule hit", else: "rule")
+  # "hit": the rule makes up the result; "also": it matches, but the hit policy (FIRST) ignores it
+  defp rule_class(%{table: t}, r) do
+    cond do
+      r in t.chosen -> "rule hit"
+      Enum.at(t.matched, r) -> "rule also"
+      true -> "rule"
+    end
+  end
 
   def table_summary(%{value: v, table: %{message: msg}}) do
     "→ <b>#{Fmt.esc(Fmt.value(v))}</b>" <> if(msg, do: ~s| <small class="warn">#{Fmt.esc(msg)}</small>|, else: "")
@@ -217,11 +282,7 @@ defmodule DmnSpike.Panel do
   def table_ops(_m, _id, _result), do: []
 
   def head(m, node, result) do
-    opts =
-      for t <- [""] ++ DmnSpike.Types.builtins() ++ Enum.map(m.types, & &1.name) do
-        sel = if t == (node.type_ref || ""), do: " selected", else: ""
-        ~s|<option value="#{Fmt.esc(t)}"#{sel}>#{if t == "", do: "&lt;Undefined&gt;", else: Fmt.esc(t)}</option>|
-      end
+    opts = type_options(m, node.type_ref)
 
     [
       ~s|<div class="nodehead"><input class="nname" data-op="nname" data-id="#{node.id}" value="#{Fmt.esc(node.name)}" spellcheck="false"/>|,
@@ -231,8 +292,14 @@ defmodule DmnSpike.Panel do
           ~s|<label>parameters <input class="params" data-op="nparams" data-id="#{node.id}" value="#{Fmt.esc(Enum.join(Model.params(node), ", "))}" placeholder="none" spellcheck="false"/></label>|,
         else: ""
       ),
-      ~s|<label>expression <select data-op="nexpr" data-id="#{node.id}"><option value="context"#{if Model.kind(node) == :context, do: " selected"}>literal / context</option>#{if node.type == :decision, do: ~s|<option value="table"#{if Model.kind(node) == :table, do: " selected"}>decision table</option>|}#{if Model.kind(node) == :raw, do: ~s|<option value="raw" selected disabled>#{Fmt.esc(node.expr.tag)} (kept, read-only)</option>|}</select></label>|,
-      ~s|<span class="errs" id="nerr-#{node.id}">#{errors_html(result)}</span></div>|
+      # input data is just a name, a type and a value: there is no expression to choose
+      if(node.type == :input,
+        do: "",
+        else:
+          ~s|<label>expression <select data-op="nexpr" data-id="#{node.id}"><option value="context"#{if Model.kind(node) == :context, do: " selected"}>literal / context</option>#{if node.type == :decision, do: ~s|<option value="table"#{if Model.kind(node) == :table, do: " selected"}>decision table</option>|}#{if Model.kind(node) == :raw, do: ~s|<option value="raw" selected disabled>#{Fmt.esc(node.expr.tag)} (kept, read-only)</option>|}</select></label>|
+      ),
+      ~s|<span class="errs" id="nerr-#{node.id}">#{errors_html(result)}</span>|,
+      ~s|<button class="close" data-click="deselect" title="Close (Esc)" aria-label="Close">✕</button></div>|
     ]
     |> IO.iodata_to_binary()
   end

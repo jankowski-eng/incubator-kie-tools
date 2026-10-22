@@ -19,8 +19,19 @@ const ok = (name, cond, extra = "") => {
   if (!cond) fails++;
   console.log(`${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  — " + extra : ""}`);
 };
+const exportDmn = async () => {
+  await page.getByRole("button", { name: /File/ }).click();
+  await page.getByRole("menuitem", { name: "Export DMN" }).click();
+};
 const text = (sel) => page.locator(sel).first().textContent();
 const settle = (ms = 500) => page.waitForTimeout(ms);
+// the dock and the import summary float over the canvas and can cover nodes: close them before clicking one
+const clickNode = async (sel, opts) => {
+  if (await page.locator("#report .x").isVisible()) await page.locator("#report .x").click();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await page.locator(sel).click(opts);
+};
 const count = (sel) => page.locator(sel).count();
 
 await page.goto("http://localhost:4000");
@@ -30,12 +41,12 @@ await page.waitForFunction(
   { timeout: 90000 }
 );
 
-// ---- XML tab
-await page.locator('[data-click="tab:xml"]').click();
-await settle();
-const xml = await text("#xml");
+// ---- XML inspector
+await page.locator(".xmlbtn").click();
+await settle(600);
+const xml = await page.evaluate(() => [...document.querySelectorAll("#xcode .xc")].map((c) => c.textContent).join("\n") + "\n");
 ok(
-  "XML tab shows generated DMN",
+  "XML inspector shows generated DMN",
   xml.startsWith('<?xml version="1.0"') &&
     xml.includes('<decision id="risk" name="Risk Category">') &&
     xml.includes('<decisionTable hitPolicy="FIRST">'),
@@ -48,15 +59,15 @@ ok(
     xml.includes("<dmndi:DMNShape") &&
     xml.includes("<dmndi:DMNEdge")
 );
-ok("editor view hidden while XML tab is open", await page.locator("#view-editor").isHidden());
+ok("the editor stays visible beside the inspector", await page.locator("#view-editor").isVisible());
 await page.screenshot({ path: `${OUT}/x1.png` });
-await page.locator('[data-click="tab:editor"]').click();
+await page.locator(".xmlbtn").click();
 await settle();
 
 // ---- export download, then import the downloaded file again
 const [dl] = await Promise.all([
   page.waitForEvent("download", { timeout: 15000 }),
-  page.locator('[data-click="export"]').click(),
+  exportDmn(),
 ]);
 const exported = `${OUT}/exported.dmn`;
 await dl.saveAs(exported);
@@ -67,7 +78,7 @@ ok(
   dl.suggestedFilename()
 );
 ok("download equals what the XML tab showed", exportedXml === xml);
-await page.locator('#scene [data-id="app"]').click();
+await clickNode('#scene [data-id="app"]');
 await settle(300);
 await page.locator('[data-cell="app:0"]').fill("{Income: 1, Tax: 1, Insurance: 1, Debt: 1}");
 await settle(500);
@@ -118,20 +129,20 @@ ok(
   (await page.locator('#scene [data-id="_app"]').getAttribute("transform")) === "translate(40 320)",
   await page.locator('#scene [data-id="_app"]').getAttribute("transform")
 );
-await page.locator('#scene [data-id="_risk"]').click();
+await clickNode('#scene [data-id="_risk"]');
 await settle(400);
 ok(
   "imported decision table renders with FIRST and 2 rules",
   (await page.locator("select[data-op=dthp]").inputValue()) === "FIRST" && (await count("table.dt tbody tr")) === 2
 );
-await page.locator('#scene [data-id="_loan_d"]').click();
+await clickNode('#scene [data-id="_loan_d"]');
 await settle(400);
 ok(
   "imported context (limit + result) renders",
   (await count("textarea[data-cell]")) === 2 &&
     (await page.locator('textarea[data-cell="_loan_d:0"]').inputValue()) === "Lender Acceptable DTI() + 5"
 );
-await page.locator('#scene [data-id="_app"]').click();
+await clickNode('#scene [data-id="_app"]');
 await settle(300);
 await page.locator('[data-cell="_app:0"]').fill("{Income: 1000, Debt: 100}");
 await settle(600);
@@ -144,15 +155,14 @@ await page.locator('[data-click="tab:types"]').click();
 await settle(400);
 ok(
   "imported data types in the Data types tab",
-  (await count(".tlist .titem")) === 3 &&
-    (await page.locator('select[data-op=ckind][data-path="0-0"]').inputValue()) === "range",
-  String(await count(".tlist .titem"))
+  (await count("#ttree .trow")) === 5 && (await text("#trow-0-0 .tcons")) === ">= 0" && (await text("#trow-2 .ttype")).includes("[]"),
+  String(await count("#ttree .trow"))
 );
 await page.locator('[data-click="tab:editor"]').click();
 await settle(300);
 
 // ---- fixture round trip through export + import is lossless for what is supported
-const [dl2] = await Promise.all([page.waitForEvent("download"), page.locator('[data-click="export"]').click()]);
+const [dl2] = await Promise.all([page.waitForEvent("download"), exportDmn()]);
 await dl2.saveAs(`${OUT}/fixture-export.dmn`);
 await page.locator("#file").setInputFiles(`${OUT}/fixture-export.dmn`);
 await settle(900);

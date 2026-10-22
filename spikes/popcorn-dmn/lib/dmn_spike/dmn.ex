@@ -46,12 +46,19 @@ defmodule DmnSpike.Dmn do
 
   # ===================================================================== export
 
-  def to_xml(m, name \\ "Popcorn spike")
+  def to_xml(m, name \\ "Popcorn spike") do
+    {header, root} = document(m, name)
+    header <> render(root, 0)
+  end
 
-  # a model that came from a file is written back into that file's document
-  def to_xml(%Model{doc: doc} = m, _name) when doc != nil, do: Overlay.to_xml(m)
+  @doc """
+  The document as `{header, root element}`: the text before the root (declaration, comments) and the tree that
+  `render/2` writes. A model that came from a file is written back into that file's document.
+  """
+  def document(m, name \\ "Popcorn spike")
+  def document(%Model{doc: doc} = m, _name) when doc != nil, do: Overlay.document(m)
 
-  def to_xml(%Model{} = m, name) do
+  def document(%Model{} = m, name) do
     # DRG elements first, then annotations and groups, as the schema has it
     nodes = m.nodes |> Map.values() |> Enum.sort_by(&{&1.type in [:annotation, :group], &1.id})
 
@@ -65,7 +72,7 @@ defmodule DmnSpike.Dmn do
           Enum.map(for({_, _, :association} = l <- m.links, do: l), &link_xml/1) ++ [dmndi(m, nodes)]
       )
 
-    ~s|<?xml version="1.0" encoding="UTF-8"?>\n| <> render(root, 0)
+    {~s|<?xml version="1.0" encoding="UTF-8"?>\n|, root}
   end
 
   @doc false
@@ -200,6 +207,13 @@ defmodule DmnSpike.Dmn do
 
   defp literal(text), do: [el("literalExpression", [], [el("text", [], [text])])]
 
+  defp type_attr(col) do
+    case Map.get(col, :type_ref) do
+      ref when ref in [nil, ""] -> []
+      ref -> [{"typeRef", ref}]
+    end
+  end
+
   defp annotated?(t), do: Map.get(t, :note_title) != nil or Enum.any?(t.rules, &(Map.get(&1, :note, "") != ""))
 
   @doc false
@@ -208,8 +222,12 @@ defmodule DmnSpike.Dmn do
       el(
         "decisionTable",
         [{"hitPolicy", t.hit_policy}],
-        Enum.map(t.inputs, fn i -> el("input", [], [el("inputExpression", [], [el("text", [], [i.expr])])]) end) ++
-          Enum.map(t.outputs, fn o -> el("output", if(o.name == "", do: [], else: [{"name", o.name}]), []) end) ++
+        Enum.map(t.inputs, fn i ->
+          el("input", [], [el("inputExpression", type_attr(i), [el("text", [], [i.expr])])])
+        end) ++
+          Enum.map(t.outputs, fn o ->
+            el("output", if(o.name == "", do: [], else: [{"name", o.name}]) ++ type_attr(o), [])
+          end) ++
           if(annotated?(t), do: [el("annotation", [{"name", Map.get(t, :note_title) || "Annotation"}], [])], else: []) ++
           Enum.map(t.rules, fn r ->
             el(
@@ -250,7 +268,7 @@ defmodule DmnSpike.Dmn do
 
     edges =
       for {from, to, kind} <- Model.edges_all(m) do
-        {x1, y1, x2, y2} = Svg.endpoints(m.nodes[from], m.nodes[to])
+        {x1, y1, x2, y2} = Svg.endpoints(m, from, to)
         rid = edge_id(from, to, kind)
 
         el("dmndi:DMNEdge", [{"id", "#{rid}-edge"}, {"dmnElementRef", rid}], [
@@ -290,6 +308,47 @@ defmodule DmnSpike.Dmn do
         open = "<" <> tag <> Enum.map_join(attrs, "", fn {k, v} -> ~s| #{k}="#{esc_attr(to_string(v))}"| end)
         if kids == [], do: open <> "/>", else: open <> ">" <> inline(kids) <> "</" <> tag <> ">"
     end)
+  end
+
+  @doc """
+  The same text as `render/2` as a list of lines, plus where each element is: `{from, to, element, parent}` with
+  1-based inclusive line numbers (`first` is the number of the first line) and `parent` as `{from, element}` or nil.
+  Used by `DmnSpike.XmlIndex`; a test keeps the two writers identical.
+  """
+  def render_lines(root, depth \\ 0, first \\ 1) do
+    {rev, spans, n} = lines_of(root, depth, nil, {[], [], first - 1})
+    {Enum.reverse(rev), Enum.reverse(spans), n - first + 1}
+  end
+
+  defp lines_of({:el, tag, attrs, kids} = el, depth, parent, {lines, spans, n0}) do
+    pad = String.duplicate("  ", depth)
+    open = pad <> "<" <> tag <> Enum.map_join(attrs, "", fn {k, v} -> ~s| #{k}="#{esc_attr(to_string(v))}"| end)
+
+    {lines, spans, n} =
+      cond do
+        kids == [] ->
+          push(open <> "/>", {lines, spans, n0})
+
+        Enum.all?(kids, &is_binary/1) ->
+          push(open <> ">" <> Enum.map_join(kids, "", &esc/1) <> "</" <> tag <> ">", {lines, spans, n0})
+
+        # text mixed with elements: one line, as `render/2` writes it
+        Enum.any?(kids, &is_binary/1) ->
+          push(open <> ">" <> inline(kids) <> "</" <> tag <> ">", {lines, spans, n0})
+
+        true ->
+          acc = push(open <> ">", {lines, spans, n0})
+          acc = Enum.reduce(kids, acc, &lines_of(&1, depth + 1, {n0 + 1, el}, &2))
+          push(pad <> "</" <> tag <> ">", acc)
+      end
+
+    {lines, [{n0 + 1, n, el, parent} | spans], n}
+  end
+
+  # a text that contains a newline is several lines in the document
+  defp push(text, {lines, spans, n}) do
+    parts = String.split(text, "\n")
+    {Enum.reverse(parts) ++ lines, spans, n + length(parts)}
   end
 
   defp esc(s), do: s |> String.replace("&", "&amp;") |> String.replace("<", "&lt;") |> String.replace(">", "&gt;")
@@ -707,12 +766,19 @@ defmodule DmnSpike.Dmn do
     kids = Enum.filter(kids, &is_tuple/1)
 
     inputs =
-      for {t, _, k} <- kids,
-          local(t) == "input",
-          do: %{expr: k |> find("inputExpression") |> children() |> find("text") |> text() |> Kernel.||("")}
+      for {t, _, k} <- kids, local(t) == "input" do
+        ie = find(k, "inputExpression")
 
-    outputs = for {t, a, _} <- kids, local(t) == "output", do: %{name: attr(a, "name") || ""}
-    outputs = if outputs == [], do: [%{name: ""}], else: outputs
+        %{
+          expr: ie |> children() |> find("text") |> text() |> Kernel.||(""),
+          type_ref: ie && attr(attrs_of(ie), "typeRef")
+        }
+      end
+
+    outputs =
+      for {t, a, _} <- kids, local(t) == "output", do: %{name: attr(a, "name") || "", type_ref: attr(a, "typeRef")}
+
+    outputs = if outputs == [], do: [%{name: "", type_ref: nil}], else: outputs
     n_out = length(outputs)
 
     rules =

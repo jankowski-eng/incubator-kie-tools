@@ -27,7 +27,7 @@ await page.waitForFunction(
   null,
   { timeout: 90000 }
 );
-await page.locator('#scene [data-id="risk"]').click();
+await page.locator('#scene [data-id="risk"] .shape').click({ force: true });
 await settle(500);
 ok(
   "selecting a decision-table node shows a table",
@@ -36,10 +36,10 @@ ok(
 ok("hit policy select shows FIRST", (await page.locator("select[data-op=dthp]").inputValue()) === "FIRST");
 ok("3 rules, 2 input columns", (await count("table.dt tbody tr")) === 3 && (await count("table.dt th.in")) === 2);
 ok(
-  "matching rules are marked (rules 2 and 3)",
+  "FIRST marks rule 2 as the hit and rule 3 as also matching",
   (await page.locator("#dr-risk-0").getAttribute("class")) === "rule" &&
     (await page.locator("#dr-risk-1").getAttribute("class")) === "rule hit" &&
-    (await page.locator("#dr-risk-2").getAttribute("class")) === "rule hit"
+    (await page.locator("#dr-risk-2").getAttribute("class")) === "rule also"
 );
 ok(
   "FIRST picks rule 2 -> Medium (summary + node badge)",
@@ -104,14 +104,29 @@ await cell("o-2-0").fill('"High"');
 await settle(400);
 
 // structure
-await page.locator('[data-click="dt-add-rule:risk"]').click();
+// the add/delete controls only show while the pointer is on their row or header
+// the controls fade in and out (0.12 s): read the opacity once it has settled
+const op = async (sel) => {
+  await page.waitForTimeout(250);
+  return page.locator(sel).evaluate((e) => +getComputedStyle(e).opacity);
+};
+await page.evaluate(() => document.activeElement.blur());
+await page.mouse.move(2, 2);
+ok("row controls are hidden until hover", (await op('[data-click="dt-ins-rule:risk:3"]')) === 0);
+await page.locator("#dr-risk-2").hover();
+ok("hovering a rule shows insert and delete", (await op('[data-click="dt-ins-rule:risk:3"]')) === 1 && (await op('[data-click="dt-del-rule:risk:2"]')) === 1);
+await page.locator("table.dt th.in").nth(1).hover();
+ok("hovering a column header shows insert and delete", (await op('[data-click="dt-ins-input:risk:2"]')) === 1 && (await op('[data-click="dt-del-input:risk:1"]')) === 1);
+await page.locator("#dr-risk-2").hover();
+await page.locator('[data-click="dt-ins-rule:risk:3"]').click();
 await settle(500);
 ok("+ rule adds a row", (await count("table.dt tbody tr")) === 4);
-await page.locator('[data-click="dt-add-input:risk"]').click();
+await page.locator("table.dt th.in").nth(1).hover();
+await page.locator('[data-click="dt-ins-input:risk:2"]').click();
 await settle(500);
 ok(
   "+ input adds a column to header and every rule",
-  (await count("table.dt th.in")) === 3 && (await count("table.dt tbody tr:first-child td textarea")) === 4
+  (await count("table.dt th.in")) === 3 && (await count("table.dt tbody tr:first-child td textarea")) === 5
 );
 await cell("h-2").fill("Applicant Data.Income");
 await settle(400);
@@ -119,8 +134,10 @@ ok(
   "column header without requirement evaluates to null (rule never matches non-wildcards)",
   (await count("table.dt")) === 1
 );
+await page.locator("table.dt th.in").nth(2).hover();
 await page.locator('[data-click="dt-del-input:risk:2"]').click();
 await settle(400);
+await page.locator("#dr-risk-3").hover();
 await page.locator('[data-click="dt-del-rule:risk:3"]').click();
 await settle(400);
 ok(
@@ -129,13 +146,36 @@ ok(
 );
 await page.screenshot({ path: `${OUT}/d2.png` });
 
+// typeRef on every column
+const colType = (path) => page.locator(`select[data-op=dttype][data-path="${path}"]`);
+ok("each column shows its typeRef select", (await count("table.dt select.coltype")) === 3);
+await colType("h-0").selectOption("tRatio");
+await colType("n-0").selectOption("tCategory");
+await settle(300);
+await page.locator('#scene [data-id="front"] .shape').click({ force: true });
+await settle(300);
+await page.locator('#scene [data-id="risk"] .shape').click({ force: true });
+await settle(400);
+ok(
+  "column types survive re-rendering the table",
+  (await colType("h-0").inputValue()) === "tRatio" && (await colType("n-0").inputValue()) === "tCategory"
+);
+
+// annotation is a cell like the others
+await page.locator("textarea[data-op=dtnote]").first().fill("low risk");
+await settle(300);
+ok(
+  "annotation is a textarea cell and mirrors its text",
+  (await text("#note-risk-0")).startsWith("low risk") && (await count("table.dt td.note .ed")) === 3
+);
+
 // undo walks back through the edits
 for (let i = 0; i < 40; i++) {
   if (await page.locator("[data-click=undo]").isDisabled()) break;
   await page.locator("[data-click=undo]").click();
   await settle(120);
 }
-await page.locator('#scene [data-id="risk"]').click();
+await page.locator('#scene [data-id="risk"] .shape').click({ force: true });
 await settle(400);
 ok(
   "undo all the way restores the sample table",
@@ -144,7 +184,7 @@ ok(
 );
 
 // switch a node between context and table
-await page.locator('#scene [data-id="loan"]').click();
+await page.locator('#scene [data-id="loan"] .shape').click({ force: true });
 await settle(400);
 await page.locator("select[data-op=nexpr]").selectOption("table");
 await settle(500);

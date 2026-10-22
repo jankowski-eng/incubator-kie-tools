@@ -23,8 +23,8 @@ defmodule DmnSpike.Svg do
 
   def edge_class(selected?), do: if(selected?, do: "edge sel", else: "edge")
 
-  def edge(%Model{nodes: nodes}, {from, to, kind}, _i) do
-    {x1, y1, x2, y2} = endpoints(nodes[from], nodes[to])
+  def edge(%Model{} = m, {from, to, kind}, _i) do
+    {x1, y1, x2, y2} = endpoints(m, from, to)
 
     {dash, marker} =
       case kind do
@@ -41,16 +41,39 @@ defmodule DmnSpike.Svg do
     |> IO.iodata_to_binary()
   end
 
-  def endpoints(a, b) do
-    {x1, y1} = border(a, center(b))
-    {x2, y2} = border(b, center(a))
+  @doc "Ends of the edge from `from` to `to`: at the chosen side of `to`, or where the line between the centres leaves each node."
+  def endpoints(%Model{nodes: nodes, anchors: anchors}, from, to) do
+    {a, b} = {nodes[from], nodes[to]}
+
+    {x2, y2} =
+      case anchors[{from, to}] do
+        nil -> border(b, center(a))
+        side -> anchor_point(b, side)
+      end
+
+    {x1, y1} = border(a, if(anchors[{from, to}], do: {x2, y2}, else: center(b)))
     {x1, y1, x2, y2}
   end
 
-  def preview(%Model{nodes: nodes}, from, {px, py}) do
-    {x1, y1} = border(nodes[from], {px, py})
+  def anchor_point(n, :top), do: {n.x + n.w / 2, n.y * 1.0}
+  def anchor_point(n, :bottom), do: {n.x + n.w / 2, n.y + n.h * 1.0}
+  def anchor_point(n, :left), do: {n.x * 1.0, n.y + n.h / 2}
+  def anchor_point(n, :right), do: {n.x + n.w * 1.0, n.y + n.h / 2}
 
-    ~s|<line x1="#{x1}" y1="#{y1}" x2="#{Float.round(px * 1.0, 1)}" y2="#{Float.round(py * 1.0, 1)}" stroke="currentColor" stroke-dasharray="3 3" marker-end="url(#arrow-fill)"/>|
+  @doc "The side of `n` whose anchor is closest to `{x, y}`."
+  def nearest_side(n, {x, y}),
+    do:
+      Enum.min_by([:top, :right, :bottom, :left], fn side ->
+        {ax, ay} = anchor_point(n, side)
+        (ax - x) * (ax - x) + (ay - y) * (ay - y)
+      end)
+
+  @doc "The dashed line while connecting: it ends at the pointer, or snaps to the anchor of the node `over` it that is nearest to the pointer."
+  def preview(%Model{nodes: nodes}, from, over, {px, py}) do
+    {x2, y2} = if over, do: anchor_point(over, nearest_side(over, {px, py})), else: {px, py}
+    {x1, y1} = border(nodes[from], {x2, y2})
+
+    ~s|<line x1="#{x1}" y1="#{y1}" x2="#{Float.round(x2 * 1.0, 1)}" y2="#{Float.round(y2 * 1.0, 1)}" stroke="currentColor" stroke-dasharray="3 3" marker-end="url(#arrow-fill)"/>|
   end
 
   def center(n), do: {n.x + n.w / 2, n.y + n.h / 2}
@@ -75,7 +98,8 @@ defmodule DmnSpike.Svg do
 
   def viewbox(%Model{nodes: nodes}) do
     ns = Map.values(nodes)
-    minx = min(0, Enum.min(Enum.map(ns, & &1.x)) - 30)
+    # 60 more on the left keeps the floating palette off the diagram
+    minx = min(0, Enum.min(Enum.map(ns, & &1.x)) - 30) - 60
     miny = min(0, Enum.min(Enum.map(ns, & &1.y)) - 30)
     maxx = Enum.max(Enum.map(ns, &(&1.x + &1.w))) + 30
     maxy = Enum.max(Enum.map(ns, &(&1.y + &1.h))) + 30
@@ -147,9 +171,26 @@ defmodule DmnSpike.Svg do
     ]
   end
 
-  defp handle(n),
-    do:
-      ~s|<g class="handle" data-handle="#{n.id}" transform="translate(#{div(n.w, 2)} 0)"><title>Drag onto a node that needs this one</title><circle r="10"/><path d="M0 4V-4M-3.5 -1L0 -4.5L3.5 -1"/></g>|
+  # The connect handle sits just outside the right edge and shows on hover; the hover pad keeps the node hovered on the
+  # way to it. While a connection is dragged, a valid target shows four anchors in a cross (see `anchors/1`).
+  defp handle(n) do
+    [
+      ~s|<rect class="hoverpad" x="#{n.w}" y="0" width="24" height="#{n.h}"/>|,
+      ~s|<g class="handle" data-handle="#{n.id}" transform="translate(#{n.w + 12} #{div(n.h, 2)})"><title>Click or drag to connect to a node that requires this one</title><circle r="7"/><path d="M-3 0H3M0.5-2.5 3 0 0.5 2.5"/></g>|,
+      anchors(n)
+    ]
+  end
+
+  defp anchors(n) do
+    for {side, x, y} <- [
+          {:top, div(n.w, 2), 0},
+          {:right, n.w, div(n.h, 2)},
+          {:bottom, div(n.w, 2), n.h},
+          {:left, 0, div(n.h, 2)}
+        ] do
+      ~s|<circle class="anchor" data-side="#{side}" cx="#{x}" cy="#{y}" r="6"/>|
+    end
+  end
 
   defp resize_handle(n),
     do:
@@ -208,7 +249,7 @@ defmodule DmnSpike.Svg do
             ~s|<g class="mk" data-create="#{k}" transform="translate(#{19 + 30 * i} 16)"><title>Add #{@labels[k]}</title><rect class="hit" x="-15" y="-15" width="30" height="30" rx="8"/>#{@icons[k]}</g>|
           end
 
-        ~s|<g class="pad" transform="translate(#{n.w + 16} #{div(n.h - 32, 2)})"><rect class="bg" width="#{w}" height="32" rx="16"/>#{buttons}</g>|
+        ~s|<g class="pad" transform="translate(#{n.w + 38} #{div(n.h - 32, 2)})"><rect class="bg" width="#{w}" height="32" rx="16"/>#{buttons}</g>|
     end
   end
 

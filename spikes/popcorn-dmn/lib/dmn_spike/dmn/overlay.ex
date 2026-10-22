@@ -161,7 +161,13 @@ defmodule DmnSpike.Dmn.Overlay do
 
   # ===================================================================== export side
 
-  def to_xml(%Model{doc: doc} = m) do
+  def to_xml(%Model{} = m) do
+    {header, root} = document(m)
+    header <> Dmn.render(root, 0)
+  end
+
+  @doc "The document as `{header, root element}`: what `to_xml/1` writes, before it is turned into text."
+  def document(%Model{doc: doc} = m) do
     pre = prefixes(doc)
     items = children_out(m, doc, pre)
 
@@ -181,7 +187,7 @@ defmodule DmnSpike.Dmn.Overlay do
     out = rename_type_refs(out, renamed_types(m))
     root_attrs = ensure_decls(doc.root_attrs, out)
     header = ~s|<?xml version="1.0" encoding="UTF-8"?>\n| <> if(doc.prolog == "", do: "", else: doc.prolog <> "\n")
-    header <> Dmn.render({:el, doc.root_tag, root_attrs, out}, 0)
+    {header, {:el, doc.root_tag, root_attrs, out}}
   end
 
   # --- renamed types -----------------------------------------------------------------
@@ -843,7 +849,7 @@ defmodule DmnSpike.Dmn.Overlay do
   end
 
   defp regen_waypoints({t, a, k}, m, from, to, pre) do
-    {x1, y1, x2, y2} = Svg.endpoints(m.nodes[from], m.nodes[to])
+    {x1, y1, x2, y2} = Svg.endpoints(m, from, to)
 
     wp =
       Enum.find_value(k, pre.di <> "waypoint", fn c ->
@@ -869,7 +875,7 @@ defmodule DmnSpike.Dmn.Overlay do
   end
 
   defp new_edge(m, rid, from, to, pre) do
-    {x1, y1, x2, y2} = Svg.endpoints(m.nodes[from], m.nodes[to])
+    {x1, y1, x2, y2} = Svg.endpoints(m, from, to)
 
     q(
       {:el, "dmndi:DMNEdge", [{"id", "dmnedge-drg-#{rid}"}, {"dmnElementRef", rid}],

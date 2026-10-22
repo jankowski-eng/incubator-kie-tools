@@ -44,26 +44,23 @@ ok(
   (await page.locator("#view-editor").isHidden()) && (await page.locator("#view-types").isVisible())
 );
 ok(
-  "list shows the 5 types, the first is selected with its 4 fields",
-  (await count(".tlist .titem")) === 5 &&
-    (await count(".titem.on")) === 1 &&
-    (await count("table.types tbody tr")) === 5 &&
-    (await text(".titem.on b")) === "tApplicant",
-  String(await count("table.types tbody tr"))
-);
-ok("struct has +field", (await count('[data-click="add-child:0"]')) === 1);
-await page.locator('[data-click="pick-type:2"]').click();
-await settle(300);
-ok(
-  "picking a type shows only that type; a scalar has no +field",
-  (await count("table.types tbody tr")) === 1 &&
-    (await text(".titem.on b")) === "tRatio" &&
-    (await count('[data-click="add-child:2"]')) === 0
+  "tree shows 5 types + 7 components",
+  (await count("#ttree .trow")) === 12,
+  String(await count("#ttree .trow"))
 );
 ok(
-  "constraint kinds shown (range on tRatio)",
-  (await page.locator('select[data-op=ckind][data-path="2"]').inputValue()) === "range"
+  "struct has +field, scalar does not",
+  (await count('[data-click="tadd-child:0"]')) === 1 && (await count('[data-click="tadd-child:2"]')) === 0
 );
+await page.locator("#trow-2").click();
+await settle(400);
+ok(
+  "selecting a row opens the inspector; [0..100] shows as an interval",
+  (await page.locator("#tview").getAttribute("data-inspector")) === "open" &&
+    (await text('.seg button[aria-pressed="true"]')) === "Interval"
+);
+await page.locator('[data-click="cmode:2:feel"]').click();
+await settle(400);
 ok("constraint is highlighted FEEL", (await count("#chl-2 .n")) >= 1 && (await text("#chl-2")) === "[0..100]");
 await page.screenshot({ path: `${OUT}/t1.png` });
 
@@ -95,22 +92,20 @@ await page.locator('textarea[data-op=ctext][data-path="2"]').fill("[0..100]");
 await settle(400);
 
 // remove constraint of tVerdict, add field to tApplicant, rename tRatio
-await page.locator('[data-click="pick-type:3"]').click();
+await page.locator("#trow-3").click();
 await settle(300);
-await page.locator('select[data-op=ckind][data-path="3"]').selectOption("");
+await page.locator('[data-click="cmode:3:none"]').click();
 await settle(400);
-ok("constraint editor disappears when kind is none", (await count('textarea[data-op=ctext][data-path="3"]')) === 0);
-await page.locator('[data-click="pick-type:0"]').click();
-await settle(300);
-await page.locator('[data-click="add-child:0"]').click();
+ok("no constraint: nothing to edit", (await count('[data-op=ctext], [data-op=citem]')) === 0 && (await text("#trow-3 .tcons")) === "—");
+await page.locator('#trow-0 [data-click="tadd-child:0"]').click();
 await settle(400);
-ok("add field appends a component row", (await count("table.types tbody tr")) === 6);
-await page.locator('[data-click="pick-type:2"]').click();
+await page.keyboard.press("Enter");
+await settle(400);
+ok("add field appends a component row", (await count("#ttree .trow")) === 13);
+await page.locator("#trow-2").click();
 await settle(300);
-await page.locator('input[data-op=tname][data-path="2"]').fill("tPercent");
-await settle(200);
-ok("the list label follows the name while typing", (await text("#tn-2")) === "tPercent");
-await page.locator('input[data-op=tname][data-path="2"]').blur();
+await page.locator("#iname").fill("tPercent");
+await page.locator("#iname").blur();
 await settle(500);
 await page.locator('[data-click="tab:editor"]').click();
 await settle();
@@ -123,20 +118,19 @@ ok("still valid after rename", (await count(".node.invalid")) === 0);
 
 await page.locator('[data-click="tab:types"]').click();
 await settle(300);
+const rowsBefore = await count("#ttree .trow");
 await page.locator('[data-click="add-type"]').click();
 await settle(400);
 ok(
-  "adding a data type selects it",
-  (await count(".tlist .titem")) === 6 && (await text(".titem.on b")) === "tNewType1",
-  await text(".titem.on b")
+  "adding a data type creates it, selected and ready to rename",
+  (await count("#ttree .trow")) === rowsBefore + 1 && (await count("#ttree .trow.sel")) === 1 && (await count("#ttree input.tedit")) === 1
 );
+await page.keyboard.press("Enter");
+await settle(300);
 await page.screenshot({ path: `${OUT}/t3.png` });
 await page.locator("[data-click=undo]").click();
 await settle(400);
-ok(
-  "undo removes it and keeps a valid selection",
-  (await count(".tlist .titem")) === 5 && (await count(".titem.on")) === 1
-);
+ok("undo removes it", (await count("#ttree .trow")) === rowsBefore);
 await page.locator('[data-click="tab:editor"]').click();
 await settle();
 
@@ -205,8 +199,8 @@ await page.mouse.up();
 await settle(400);
 ok(
   "input -> input rejected",
-  (await text("#status")).includes("✗ input cannot be required by input") && (await count("#scene line.vis")) === 12,
-  await text("#status")
+  (await text("#toast")).includes("✗ input cannot be required by input") && (await count("#scene line.vis")) === 12,
+  await text("#toast")
 );
 // cycle: loan -> front would be a cycle
 await page.locator('[data-id="loan"]').click();
@@ -218,7 +212,7 @@ await page.mouse.down();
 await page.mouse.move(fr.x, fr.y, { steps: 5 });
 await page.mouse.up();
 await settle(400);
-ok("cycle rejected", (await text("#status")).includes("cycle"), await text("#status"));
+ok("cycle rejected", (await text("#toast")).includes("cycle"), await text("#toast"));
 
 // ---------- delete edge, delete node
 // the selected node's pad floats over nearby edges, so select a far-away node first

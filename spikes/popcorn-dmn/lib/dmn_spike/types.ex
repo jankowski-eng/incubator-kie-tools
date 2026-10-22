@@ -158,6 +158,72 @@ defmodule DmnSpike.Types do
     end
   end
 
+  # --- checks for the editor ------------------------------------------------------
+
+  @doc "The type or component at `path`, or nil when the path no longer exists (the model changed under a selection)."
+  def fetch(types, [i]), do: Enum.at(types, i)
+
+  def fetch(types, [i | rest]) do
+    case Enum.at(types, i) do
+      nil -> nil
+      t -> fetch(t.components, rest)
+    end
+  end
+
+  def siblings(types, [_]), do: types
+  def siblings(types, path), do: types |> fetch(Enum.drop(path, -1)) |> Map.fetch!(:components)
+
+  @doc "Why the name at `path` is not acceptable, or nil."
+  def name_error(types, path) do
+    t = fetch(types, path)
+    own = List.last(path)
+
+    cond do
+      String.trim(t.name) == "" ->
+        "A name is required"
+
+      Enum.any?(Enum.with_index(siblings(types, path)), fn {x, i} -> i != own and x.name == t.name end) ->
+        "\"#{t.name}\" is already used here"
+
+      true ->
+        nil
+    end
+  end
+
+  @doc "Why the type reference of `t` does not resolve, or nil."
+  def ref_error(_m, %{ref: ref}) when ref in [nil, ""], do: nil
+
+  def ref_error(%Model{} = m, %{ref: ref}),
+    do: if(ref in @builtins or find(m, ref), do: nil, else: "Unknown type \"#{ref}\"")
+
+  @doc "Every problem to show for the item at `path`."
+  def errors(%Model{} = m, path) do
+    t = fetch(m.types, path)
+    c = constraint_error(t.constraint)
+    Enum.reject([name_error(m.types, path), ref_error(m, t), c && c.message], &is_nil/1)
+  end
+
+  @doc "The built-in type a type resolves to (following references), or nil for a structure."
+  def base(%Model{} = m, %{ref: ref}, depth \\ 0) do
+    cond do
+      depth > 10 or ref in [nil, ""] -> nil
+      ref in @builtins -> ref
+      t = find(m, ref) -> base(m, t, depth + 1)
+      true -> nil
+    end
+  end
+
+  @doc "Where the top-level type `name` is used: `%{nodes: [names], types: [\"Type\" or \"Type.field\"]}`."
+  def usages(%Model{} = m, name) do
+    nodes = for {_, n} <- m.nodes, n.type_ref == name, do: n.name
+    %{nodes: Enum.sort(nodes), types: for(t <- m.types, label <- refs_in(t, t.name, name), do: label)}
+  end
+
+  defp refs_in(t, label, name) do
+    own = if t.ref == name and label != name, do: [label], else: []
+    own ++ Enum.flat_map(t.components, &refs_in(&1, label <> "." <> &1.name, name))
+  end
+
   # --- path edits (a path is a list of indexes through components) ----------------
 
   def get(types, [i]), do: Enum.at(types, i)
