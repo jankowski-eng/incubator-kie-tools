@@ -314,13 +314,36 @@ defmodule DmnSpike.Dmn do
     end
   end
 
-  # DRG elements without an id get one, so every element can be found again when the file is written back
+  # DRG elements, associations and requirements without an id get one, so every element can be found
+  # again when the file is written back, and a diagram edge can refer to it
+  @requirements ["informationRequirement", "knowledgeRequirement", "authorityRequirement"]
+
   defp ensure_ids(children) do
     children
     |> Enum.with_index()
     |> Enum.map(fn
       {{tag, a, k}, i} ->
-        if @elements[local(tag)] && attr(a, "id") == nil, do: {tag, a ++ [{"id", "_auto-#{i}"}], k}, else: {tag, a, k}
+        a =
+          if (@elements[local(tag)] || local(tag) == "association") && attr(a, "id") == nil,
+            do: a ++ [{"id", "_auto-#{i}"}],
+            else: a
+
+        k = if @elements[local(tag)], do: ensure_requirement_ids(k, i), else: k
+        {tag, a, k}
+
+      {other, _} ->
+        other
+    end)
+  end
+
+  defp ensure_requirement_ids(kids, i) do
+    kids
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {{t, a, k}, j} ->
+        if local(t) in @requirements and attr(a, "id") == nil,
+          do: {t, a ++ [{"id", "_auto-#{i}-#{j}"}], k},
+          else: {t, a, k}
 
       {other, _} ->
         other

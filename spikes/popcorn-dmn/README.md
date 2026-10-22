@@ -47,7 +47,7 @@ Where the editor can and cannot run (iframes, popups, VS Code) is measured in [E
 
 ## Verification
 
-`mix test` covers the pure logic (105 tests, including the real KIE sample and the open-and-save guarantees). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, workspace layout and on-canvas actions, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
+`mix test` covers the pure logic (111 tests, including the real KIE sample and the open-and-save guarantees). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, workspace layout and on-canvas actions, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
 
 Notes from building this:
 

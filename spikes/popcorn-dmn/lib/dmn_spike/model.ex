@@ -283,7 +283,7 @@ defmodule DmnSpike.Model do
   def add_node(%__MODULE__{} = m, kind, x, y) do
     {type, label} = Map.fetch!(@kinds, kind)
     # `next` is only a hint: an imported file may already use n<next>, n<next+1>, ...
-    n = Enum.find(m.next..(m.next + map_size(m.nodes)), &(not Map.has_key?(m.nodes, "n#{&1}")))
+    n = m.next |> Stream.iterate(&(&1 + 1)) |> Enum.find(&id_free?(m, "n#{&1}"))
     id = "n#{n}"
     names = MapSet.new(Map.values(m.nodes), & &1.name)
     base = "New #{label}"
@@ -355,6 +355,17 @@ defmodule DmnSpike.Model do
   end
 
   defp overlaps?(n, x, y, w, h), do: x < n.x + n.w + 20 and n.x < x + w + 20 and y < n.y + n.h + 20 and n.y < y + h + 20
+
+  # An XML id must be unique in the whole document, not just among the nodes: an imported file may use
+  # n1 for a variable or an expression. The ids this node will write (its own, its variable, its diagram
+  # shape) are checked against everything the file already has.
+  defp id_free?(m, id) do
+    taken = if m.doc, do: m.doc.ids, else: MapSet.new()
+
+    Enum.all?([id, id <> "-var", "dmnshape-drg-" <> id], fn candidate ->
+      not Map.has_key?(m.nodes, candidate) and not MapSet.member?(taken, candidate)
+    end)
+  end
 
   def delete_node(%__MODULE__{} = m, id) do
     touches = fn {a, b, _} -> a == id or b == id end

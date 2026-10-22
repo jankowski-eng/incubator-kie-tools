@@ -1226,6 +1226,125 @@ defmodule DmnSpikeTest do
     end
   end
 
+  describe "review round three (ids, merge order, diagram)" do
+    alias DmnSpike.Dmn
+
+    @ns3 ~s|xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20230324/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:di="http://www.omg.org/spec/DMN/20180521/DI/" name="d" id="d1"|
+    defp doc3(body), do: ~s|<definitions #{@ns3}>#{body}</definitions>|
+    defp import3!(xml), do: Dmn.from_xml(xml) |> then(fn {:ok, m, _} -> m end)
+    defp all_ids(xml), do: Regex.scan(~r/\bid="([^"]+)"/, xml) |> Enum.map(&List.last/1)
+
+    @table3 """
+    <decision id="a" name="A"><variable id="v" name="A"/>
+      <decisionTable id="dt" hitPolicy="FIRST">
+        <input id="i1"><inputExpression id="ie" typeRef="number"><text>1</text></inputExpression><inputValues id="iv"><text>1,2</text></inputValues></input>
+        <output id="o1" name="r"><outputValues id="ov"><text>"x","y"</text></outputValues><defaultOutputEntry id="doe"><text>"x"</text></defaultOutputEntry></output>
+        <rule id="r1"><inputEntry id="e1"><text>1</text></inputEntry><outputEntry id="oe1"><text>"x"</text></outputEntry></rule>
+        <rule id="r2"><inputEntry id="e2"><text>2</text></inputEntry><outputEntry id="oe2"><text>"y"</text></outputEntry></rule>
+      </decisionTable>
+    </decision>
+    """
+
+    test "a new node never takes an id the document already uses for something else" do
+      m = import3!(doc3(~s|<inputData id="i" name="In"><variable id="n1" name="In"/></inputData>|))
+      {m, id} = Model.add_node(m, "decision", 10, 10)
+      refute id == "n1"
+      ids = all_ids(Dmn.to_xml(m))
+      assert ids == Enum.uniq(ids), "every id in the exported document is unique"
+
+      # also against ids generated for a node: n2's variable would be n2-var
+      m = import3!(doc3(~s|<inputData id="i" name="In"><variable id="n1-var" name="In"/></inputData>|))
+      {_, id} = Model.add_node(m, "decision", 10, 10)
+      refute id == "n1"
+    end
+
+    test "editing a table cell keeps what an output and an input hold besides their text" do
+      m = import3!(doc3(@table3))
+      out = m |> Model.set_table_text("a", ["e", 0, 0], "2") |> Dmn.to_xml()
+      assert out =~ ~s|<outputValues id="ov">|
+      assert out =~ ~s|<defaultOutputEntry id="doe">|
+      assert out =~ ~s|<inputValues id="iv">|
+
+      assert out =~ ~r/<inputExpression id="ie" typeRef="number">.*<\/inputExpression>\s*<inputValues/s,
+             "inputValues stays after inputExpression, as the schema says"
+    end
+
+    test "what the model removes does not come back: the last rule, all parameters" do
+      m = import3!(doc3(@table3))
+      m = Model.del_rule(m, "a", 1)
+      m = Model.del_rule(m, "a", 0)
+      out = Dmn.to_xml(m)
+      refute out =~ "<rule", "deleting every rule leaves none"
+      assert out =~ ~s|<outputValues id="ov">|, "unmodelled children are still kept"
+
+      bkm =
+        doc3(
+          ~s|<businessKnowledgeModel id="k" name="K"><variable id="kv" name="K"/><encapsulatedLogic id="el"><formalParameter id="p1" name="x"/><literalExpression id="le"><text>1</text></literalExpression></encapsulatedLogic></businessKnowledgeModel>|
+        )
+
+      m = import3!(bkm)
+      out = m |> Model.set_params("k", "") |> Model.set_text("k", 0, "2") |> Dmn.to_xml()
+      refute out =~ "<formalParameter"
+      assert out =~ ~s|<encapsulatedLogic id="el">|
+    end
+
+    test "turning a context into a decision table leaves no diagram reference to the removed ids" do
+      m = import3!(File.read!("test/fixtures/Sample.dmn"))
+      id = Enum.find_value(m.nodes, fn {k, n} -> if n.name == "Front End Ratio", do: k end)
+      assert Model.kind(m.nodes[id]) == :context
+      out = m |> Model.set_expr_kind(id, :table) |> Dmn.to_xml()
+      ids = MapSet.new(all_ids(out))
+      refs = Regex.scan(~r/dmnElementRef="([^"]+)"/, out) |> Enum.map(&List.last/1)
+
+      assert Enum.all?(refs, &MapSet.member?(ids, &1)),
+             "dangling: #{inspect(Enum.reject(refs, &MapSet.member?(ids, &1)))}"
+    end
+
+    test "a requirement without an id gets one, and the diagram edge refers to it" do
+      xml =
+        doc3("""
+        <inputData id="i" name="In"><variable id="iv" name="In"/></inputData>
+        <decision id="a" name="A"><variable id="v" name="A"/>
+          <informationRequirement><requiredInput href="#i"/></informationRequirement>
+          <literalExpression><text>In</text></literalExpression>
+        </decision>
+        """)
+
+      m = import3!(xml)
+      out = m |> Model.move("a", 300, 300) |> Dmn.to_xml()
+      ids = MapSet.new(all_ids(out))
+      refs = Regex.scan(~r/dmnElementRef="([^"]+)"/, out) |> Enum.map(&List.last/1)
+      assert Enum.any?(refs, &String.starts_with?(&1, "_auto-")), "there is an edge for the requirement"
+      assert Enum.all?(refs, &MapSet.member?(ids, &1)), "and it refers to an element that exists"
+    end
+
+    test "a moved edge keeps its style before the waypoints and its label after them" do
+      xml =
+        doc3("""
+        <inputData id="i" name="In"><variable id="iv" name="In"/></inputData>
+        <decision id="a" name="A"><variable id="v" name="A"/>
+          <informationRequirement id="r"><requiredInput href="#i"/></informationRequirement>
+          <literalExpression><text>In</text></literalExpression>
+        </decision>
+        <dmndi:DMNDI><dmndi:DMNDiagram id="dg">
+          <dmndi:DMNShape id="s1" dmnElementRef="i"><dc:Bounds x="0" y="100" width="150" height="60"/></dmndi:DMNShape>
+          <dmndi:DMNShape id="s2" dmnElementRef="a"><dc:Bounds x="0" y="0" width="150" height="60"/></dmndi:DMNShape>
+          <dmndi:DMNEdge id="e" dmnElementRef="r">
+            <dmndi:DMNStyle strokeColor="red"/>
+            <di:waypoint x="75" y="100"/><di:waypoint x="75" y="60"/>
+            <dmndi:DMNLabel><dmndi:Text>why</dmndi:Text></dmndi:DMNLabel>
+          </dmndi:DMNEdge>
+        </dmndi:DMNDiagram></dmndi:DMNDI>
+        """)
+
+      out = xml |> import3!() |> Model.move("a", 400, 0) |> Dmn.to_xml()
+      [edge] = Regex.run(~r/<dmndi:DMNEdge.*?<\/dmndi:DMNEdge>/s, out)
+      at = fn tag -> edge |> :binary.match(tag) |> elem(0) end
+      assert at.("<dmndi:DMNStyle") < at.("<di:waypoint")
+      assert at.("<di:waypoint") < at.("<dmndi:DMNLabel")
+    end
+  end
+
   describe "descriptions" do
     alias DmnSpike.Dmn
 
@@ -1352,8 +1471,13 @@ defmodule DmnSpikeTest do
       {_, _, kids_in} = before
       {_, _, kids_out} = parse!(out)
       differing = for {a, b} <- Enum.zip(kids_in, kids_out), a != b, do: elem(a, 0)
-      assert differing == ["dmn:decision"], "only the edited decision differs (the diagram is unchanged too)"
+      # Back End Ratio is an invocation in the file; the edit replaces it, so the diagram entries that pointed
+      # at the invocation (KIE's column widths) go with it and nothing else changes
+      assert differing == ["dmn:decision", "dmndi:DMNDI"]
       assert out =~ "Applicant Data.Monthly.Repayments) + 1"
+      ids = Regex.scan(~r/\bid="([^"]+)"/, out) |> Enum.map(&List.last/1) |> MapSet.new()
+      refs = Regex.scan(~r/dmnElementRef="([^"]+)"/, out) |> Enum.map(&List.last/1)
+      assert Enum.all?(refs, &MapSet.member?(ids, &1)), "no diagram reference points at a removed element"
     end
 
     test "new elements are written in the file's own prefixes and appear in the diagram" do

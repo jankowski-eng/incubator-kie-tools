@@ -77,6 +77,8 @@ defmodule DmnSpike.Dmn.Overlay do
       end
 
     %{
+      # every id the file uses, so that nothing generated can collide with it
+      ids: MapSet.new(simple_ids(children)),
       prolog: prolog(xml),
       root_tag: root_tag,
       root_attrs: root_attrs,
@@ -295,6 +297,13 @@ defmodule DmnSpike.Dmn.Overlay do
   defp mixed_child(text), do: text
 
   defp kept_children(kids), do: for(k <- kids, is_tuple(k), do: from_simple(k))
+
+  defp simple_ids(items) do
+    Enum.flat_map(items, fn
+      {_, attrs, kids} -> for({"id", v} <- attrs, do: v) ++ simple_ids(Enum.filter(kids, &is_tuple/1))
+      _ -> []
+    end)
+  end
 
   defp collect_ids(items) do
     Enum.flat_map(items, fn {:el, _, attrs, kids} ->
@@ -561,19 +570,61 @@ defmodule DmnSpike.Dmn.Overlay do
   defp merge({:el, tag, fattrs, fkids}, {_, rattrs, rkids}) do
     kept = Enum.reject(rattrs, fn {k, _} -> Dmn.local(k) in @owned and not List.keymember?(fattrs, k, 0) end)
     attrs = Enum.reduce(fattrs, kept, &put_attrs(&2, [&1]))
-    {:el, tag, attrs, merge_children(fkids, for(k <- rkids, is_tuple(k), do: k))}
+    {:el, tag, attrs, merge_children(Dmn.local(tag), fkids, for(k <- rkids, is_tuple(k), do: k))}
   end
 
-  defp merge_children(fkids, rkids) do
-    if Enum.all?(fkids, &is_binary/1), do: fkids, else: merge_elements(fkids, rkids)
+  # A text leaf has text children; an element with no children at all (a table `output`) is structural and
+  # keeps what the original had besides.
+  defp merge_children(parent, fkids, rkids) do
+    if fkids != [] and Enum.all?(fkids, &is_binary/1), do: fkids, else: merge_elements(parent, fkids, rkids)
   end
 
-  defp merge_elements(fkids, rkids) do
+  # Children the model produces itself, per parent. When the regenerated element has none of a kind, the
+  # model removed them (the last rule, all parameters) and the original's must not come back.
+  @owned %{
+    "decisionTable" => ~w(input output annotation rule),
+    "rule" => ~w(inputEntry outputEntry annotationEntry),
+    "input" => ~w(inputExpression),
+    "inputExpression" => ~w(text),
+    "inputEntry" => ~w(text),
+    "outputEntry" => ~w(text),
+    "annotationEntry" => ~w(text),
+    "encapsulatedLogic" => ~w(formalParameter) ++ @expr_tags,
+    "context" => ~w(contextEntry),
+    "contextEntry" => ~w(variable) ++ @expr_tags,
+    "literalExpression" => ~w(text)
+  }
+
+  # DMN16.xsd child order of the elements merged here; tDMNElement's description and extensionElements
+  # always come first, anything not listed after the listed ones
+  @order %{
+    "decisionTable" => ~w(description extensionElements input output annotation rule),
+    "rule" => ~w(description extensionElements inputEntry outputEntry annotationEntry),
+    "input" => ~w(description extensionElements inputExpression inputValues),
+    "output" => ~w(description extensionElements outputValues defaultOutputEntry),
+    "encapsulatedLogic" => ~w(description extensionElements formalParameter),
+    "context" => ~w(description extensionElements contextEntry),
+    "contextEntry" => ~w(description extensionElements variable),
+    "literalExpression" => ~w(description extensionElements text importedValues)
+  }
+
+  defp child_rank(parent, name) do
+    order = Map.get(@order, parent, ~w(description extensionElements))
+    Enum.find_index(order, &(&1 == name)) || length(order)
+  end
+
+  defp merge_elements(parent, fkids, rkids) do
     # regenerated elements are {:el, tag, attrs, kids}, the original's are Saxy's {tag, attrs, kids}
     fresh_by = Enum.group_by(fkids, &Dmn.local(elem(&1, 1)))
     raw_by = Enum.group_by(rkids, &Dmn.local(elem(&1, 0)))
     # unmodelled children of the original (description, extensionElements, ...) come first, as in the schema
-    unknown = for r <- rkids, not Map.has_key?(fresh_by, Dmn.local(elem(r, 0))), do: from_simple(r)
+    owned = Map.get(@owned, parent, [])
+
+    unknown =
+      for r <- rkids,
+          name = Dmn.local(elem(r, 0)),
+          not Map.has_key?(fresh_by, name) and name not in owned,
+          do: from_simple(r)
 
     {merged, _} =
       Enum.map_reduce(fkids, %{}, fn {:el, t, _, _} = f, seen ->
@@ -587,7 +638,8 @@ defmodule DmnSpike.Dmn.Overlay do
         {merged, Map.put(seen, name, i + 1)}
       end)
 
-    unknown ++ merged
+    # a stable sort keeps the regenerated children in order among themselves
+    Enum.sort_by(unknown ++ merged, fn {:el, t, _, _} -> child_rank(parent, Dmn.local(t)) end)
   end
 
   # the value of an input data node lives in our own extension element; other extension content is kept
@@ -641,8 +693,25 @@ defmodule DmnSpike.Dmn.Overlay do
   defp diagram_changed?(m, doc), do: diagram_state(m) != doc.diagram.snapshot
 
   defp dmndi_el(m, doc, pre, ids_out) do
-    if diagram_changed?(m, doc), do: rebuild_diagram(m, doc, pre, ids_out), else: from_simple(doc.diagram.raw)
+    if diagram_changed?(m, doc) or dangling?(doc, ids_out),
+      do: rebuild_diagram(m, doc, pre, ids_out),
+      else: from_simple(doc.diagram.raw)
   end
+
+  # An edit can remove an element the untouched diagram still points at (a regenerated expression loses
+  # its id, and with it KIE's column widths entry). Only references to ids the file had and no longer
+  # has count: references that were dangling in the file are not ours to clean up.
+  defp dangling?(%{diagram: %{raw: nil}}, _ids_out), do: false
+
+  defp dangling?(doc, ids_out) do
+    lost = MapSet.difference(doc.ids, ids_out)
+    lost != MapSet.new() and Enum.any?(refs(doc.diagram.raw), &MapSet.member?(lost, &1))
+  end
+
+  defp refs({_, attrs, kids}),
+    do:
+      for({"dmnElementRef", v} <- attrs, do: v) ++
+        Enum.flat_map(kids, fn k -> if is_tuple(k), do: refs(k), else: [] end)
 
   defp rebuild_diagram(m, doc, pre, ids_out) do
     # the requirement ids in the output, per edge
@@ -767,10 +836,13 @@ defmodule DmnSpike.Dmn.Overlay do
       end)
 
     others = for c <- k, is_tuple(c), Dmn.local(elem(c, 0)) != "waypoint", do: from_simple(c)
+    # DI order: extension and style, then the waypoints, then the label
+    {label, before} = Enum.split_with(others, &(Dmn.local(elem(&1, 1)) == "DMNLabel"))
 
     {:el, t, a,
-     [{:el, wp, [{"x", round(x1)}, {"y", round(y1)}], []}, {:el, wp, [{"x", round(x2)}, {"y", round(y2)}], []}] ++
-       others}
+     before ++
+       [{:el, wp, [{"x", round(x1)}, {"y", round(y1)}], []}, {:el, wp, [{"x", round(x2)}, {"y", round(y2)}], []}] ++
+       label}
   end
 
   defp new_shape(n, pre) do
