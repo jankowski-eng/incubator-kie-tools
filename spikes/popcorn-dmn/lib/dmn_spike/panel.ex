@@ -3,20 +3,56 @@ defmodule DmnSpike.Panel do
 
   alias DmnSpike.{Fmt, Highlight, Model}
 
-  def render(_m, nil, _results), do: ~s|<p class="hint">Click a node to edit its expression.</p>|
+  def render(m, id, results, dock \\ "expr")
 
-  def render(%Model{} = m, id, results) do
+  def render(_m, nil, _results, _dock), do: ~s|<p class="hint">Click a node to edit its expression.</p>|
+
+  def render(%Model{} = m, id, results, dock) do
     node = m.nodes[id]
-    head = head(m, node, results[id])
 
     body =
-      case Model.kind(node) do
-        :table -> table(node, results[id])
-        :context -> context(node, results[id])
-        :raw -> raw(node)
+      cond do
+        dock == "props" ->
+          props(m, node)
+
+        true ->
+          case Model.kind(node) do
+            :table -> table(node, results[id])
+            :context -> context(node, results[id])
+            :raw -> raw(node)
+          end
       end
 
-    IO.iodata_to_binary([head, body])
+    IO.iodata_to_binary([head(m, node, results[id]), tabs(dock), body])
+  end
+
+  defp tabs(dock) do
+    btn = fn id, label ->
+      ~s|<button data-click="dock:#{id}" aria-pressed="#{dock == id}">#{label}</button>|
+    end
+
+    ~s|<div class="dtabs" role="group" aria-label="Inspector">#{btn.("expr", "Expression")}#{btn.("props", "Properties")}</div>|
+  end
+
+  # description, identity and how the node is wired
+  defp props(m, node) do
+    {requires, required_by} = Model.neighbours(m, node.id)
+
+    chips = fn
+      [] ->
+        ~s|<span class="none">none</span>|
+
+      list ->
+        Enum.map_join(list, " ", fn {id, name, kind} ->
+          ~s|<button class="chip #{kind}" data-click="goto:#{id}" title="#{kind} requirement">#{Fmt.esc(name)}</button>|
+        end)
+    end
+
+    [
+      ~s|<div class="props"><label class="desc">Description<textarea data-op="ndesc" data-id="#{node.id}" rows="4" placeholder="What is this #{kind(node)} for?" spellcheck="true">#{Fmt.esc(Model.description(node))}</textarea></label>|,
+      ~s|<dl><dt>Kind</dt><dd>#{kind(node)}</dd><dt>ID</dt><dd><code>#{Fmt.esc(node.id)}</code></dd>|,
+      ~s|<dt>Requires</dt><dd>#{chips.(requires)}</dd><dt>Required by</dt><dd>#{chips.(required_by)}</dd></dl></div>|
+    ]
   end
 
   # an expression kind the editor cannot edit yet: shown, written back exactly as in the file

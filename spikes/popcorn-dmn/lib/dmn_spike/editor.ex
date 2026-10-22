@@ -53,6 +53,7 @@ defmodule DmnSpike.Editor do
     svg.addEventListener('pointerdown', (e) => {
       const h = e.target.closest('[data-handle]'), g = e.target.closest('[data-id]'), l = e.target.closest('[data-edge]');
       const mk = e.target.closest('[data-create]');
+      if (e.target.closest('[data-info]')) ed({t: 'click', what: 'dock:props'});
       if (mk) ed({t: 'create', kind: mk.dataset.create});
       else if (e.target.closest('[data-typepill]')) ed({t: 'focus_type'});
       else if (e.target.closest('[data-del]')) ed({t: 'delete'});
@@ -187,6 +188,7 @@ defmodule DmnSpike.Editor do
       group: nil,
       connect: nil,
       type_sel: 0,
+      dock: "expr",
       tab: "editor",
       report: nil,
       name: "Popcorn spike",
@@ -316,6 +318,24 @@ defmodule DmnSpike.Editor do
     |> Map.update!(:model, &Model.delete_node(&1, id))
     |> Map.put(:selected, nil)
     |> render_all(true)
+  end
+
+  defp event(%{"t" => "click", "what" => "dock:" <> dock}, state) when dock in ["expr", "props"] do
+    state = %{state | dock: dock}
+    results = Eval.run(state.model)
+    patch([["html", "#panel", Panel.render(state.model, state.selected, results, dock)]])
+    state
+  end
+
+  defp event(%{"t" => "click", "what" => "goto:" <> id}, state) do
+    if state.model.nodes[id], do: select(%{state | sel_edge: nil}, {:node, id}), else: state
+  end
+
+  defp event(%{"t" => "op", "op" => "ndesc", "id" => id, "value" => v}, state) do
+    state = push_history(state, {:ndesc, id}, :merge)
+    state = %{state | model: Model.set_description(state.model, id, v)}
+    patch([["html", "#info-#{id}", Svg.info(state.model.nodes[id])]])
+    state
   end
 
   defp event(%{"t" => "focus_type"}, state) do
@@ -576,7 +596,11 @@ defmodule DmnSpike.Editor do
     state = push_history(state, nil)
     state = %{state | model: fun.(state.model)}
     results = Eval.run(state.model)
-    patch([["html", "#panel", Panel.render(state.model, state.selected, results)] | refresh_ops(state, results)])
+
+    patch([
+      ["html", "#panel", Panel.render(state.model, state.selected, results, state.dock)] | refresh_ops(state, results)
+    ])
+
     state
   end
 
@@ -601,7 +625,7 @@ defmodule DmnSpike.Editor do
            [
              ["attr", ~s|[data-id="#{id}"]|, "class", Svg.node_class(true, results[id].errors != [])],
              ["html", "#pad-#{id}", Svg.pad(state.model.nodes[id])],
-             ["html", "#panel", Panel.render(state.model, id, results)]
+             ["html", "#panel", Panel.render(state.model, id, results, state.dock)]
            ]}
 
         {:edge, i} ->
@@ -745,7 +769,7 @@ defmodule DmnSpike.Editor do
       [
         ["attr", "#drd", "viewBox", viewbox(state)],
         ["html", "#scene", Svg.scene(state.model, results, state.selected, state.sel_edge)],
-        ["html", "#panel", Panel.render(state.model, state.selected, results)],
+        ["html", "#panel", Panel.render(state.model, state.selected, results, state.dock)],
         ["html", "#types", TypesPanel.render(state.model, state.type_sel)],
         ["hidden", "#view-editor", state.tab != "editor"],
         ["hidden", "#view-types", state.tab != "types"],

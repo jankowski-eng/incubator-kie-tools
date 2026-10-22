@@ -568,6 +568,51 @@ defmodule DmnSpikeTest do
     end
   end
 
+  describe "descriptions" do
+    alias DmnSpike.Dmn
+
+    test "a description round-trips through a fresh export and is written before the variable" do
+      m = Model.set_description(Model.sample(), "front", "Share of income that goes to housing & debt <12%")
+      xml = Dmn.to_xml(m)
+      assert xml =~ ~r/<description>Share of income that goes to housing &amp; debt &lt;12%<\/description>\s*<variable/
+      {:ok, m2, _} = Dmn.from_xml(xml)
+      assert m2.nodes["front"].description == "Share of income that goes to housing & debt <12%"
+      assert m2.nodes["app"].description == ""
+      refute Dmn.to_xml(Model.sample()) =~ "<description"
+    end
+
+    test "editing a node keeps its original description element; changing it rewrites only the text" do
+      xml = """
+      <definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="d" id="d1">
+        <decision id="a" name="A">
+          <description kie:note="x" xmlns:kie="urn:kie">Keep me</description>
+          <variable id="a-v" name="A"/>
+          <literalExpression id="a-l"><text>1</text></literalExpression>
+        </decision>
+      </definitions>
+      """
+
+      {:ok, m, _} = Dmn.from_xml(xml)
+      assert m.nodes["a"].description == "Keep me"
+
+      out = m |> Model.set_text("a", 0, "2") |> Dmn.to_xml()
+      assert out =~ ~s|<description kie:note="x" xmlns:kie="urn:kie">Keep me</description>|
+
+      out = m |> Model.set_description("a", "Changed") |> Dmn.to_xml()
+      assert out =~ "<description>Changed</description>"
+      refute out =~ "Keep me"
+      out = m |> Model.set_description("a", "") |> Dmn.to_xml()
+      refute out =~ "<description"
+    end
+
+    test "neighbours lists what a node requires and what requires it" do
+      {req, by} = Model.neighbours(Model.sample(), "front")
+      assert Enum.sort(Enum.map(req, &elem(&1, 0))) == ["app", "prod"]
+      assert Enum.sort(Enum.map(by, &elem(&1, 0))) == ["back", "loan", "risk"]
+      assert {"back", _, :info} = Enum.find(by, &(elem(&1, 0) == "back"))
+    end
+  end
+
   describe "a file survives being opened and saved" do
     alias DmnSpike.Dmn
 

@@ -120,6 +120,55 @@ await page.locator("[data-click=undo]").click();
 await settle(500);
 ok("undo restores it", (await text("#scene g[data-id=front] .tpill text")) === "tRatio");
 
+// properties tab: description, identity, wiring
+await page.locator('#scene g[data-id="front"]').click();
+await settle();
+ok("no info badge without a description", (await count("#scene g[data-id=front] .info")) === 0);
+await page.locator('[data-click="dock:props"]').click();
+await settle();
+ok(
+  "properties show kind, id and neighbours",
+  (await text(".props dl")).includes("decision") &&
+    (await text(".props dl")).includes("front") &&
+    (await count(".props .chip")) === 5,
+  String(await count(".props .chip"))
+);
+await page.locator('textarea[data-op="ndesc"]').fill("Monthly housing cost as a share of income.");
+await settle(500);
+ok("a description puts an info badge on the node", (await count("#scene g[data-id=front] .info")) === 1);
+ok(
+  "its tooltip is the description",
+  (await page.locator("#scene g[data-id=front] .info title").textContent()) ===
+    "Monthly housing cost as a share of income."
+);
+await page.locator('.props .chip:has-text("Applicant Data")').click();
+await settle(500);
+ok(
+  "a neighbour chip selects that node and stays on Properties",
+  (await count('.node.sel[data-id="app"]')) === 1 && (await count('textarea[data-op="ndesc"]')) === 1
+);
+await page.locator('#scene g[data-id="front"] .info').click();
+await settle(500);
+ok(
+  "the info badge opens the description",
+  (await count('.node.sel[data-id="front"]')) === 1 &&
+    (await page.locator('textarea[data-op="ndesc"]').inputValue()) === "Monthly housing cost as a share of income."
+);
+await page.locator('[data-click="tab:xml"]').click();
+await settle(500);
+ok(
+  "the description is in the XML",
+  (await text("#xml")).includes("<description>Monthly housing cost as a share of income.</description>")
+);
+await page.locator('[data-click="tab:editor"]').click();
+await settle();
+await page.locator("[data-click=undo]").click();
+await settle(500);
+ok("undo removes it", (await count("#scene g[data-id=front] .info")) === 0);
+await page.locator('[data-click="dock:expr"]').click();
+await settle();
+ok("Expression tab brings the table back", (await count("table.boxed, table.dt")) >= 1);
+
 // Enter moves down a decision-table column
 await page.locator('#scene g[data-id="risk"]').click();
 await settle();

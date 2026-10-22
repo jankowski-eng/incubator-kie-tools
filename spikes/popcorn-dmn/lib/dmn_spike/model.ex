@@ -45,7 +45,20 @@ defmodule DmnSpike.Model do
       |> Map.new(fn {id, type, name, x, y, rows, result} ->
         expr = %{rows: Enum.map(rows, fn {n, t} -> %{name: n, text: t} end), result: result}
         expr = if type == :bkm, do: Map.put(expr, :params, []), else: expr
-        node = %{id: id, type: type, name: name, x: x, y: y, w: 150, h: 60, expr: expr, type_ref: @type_refs[id]}
+
+        node = %{
+          id: id,
+          type: type,
+          name: name,
+          description: "",
+          x: x,
+          y: y,
+          w: 150,
+          h: 60,
+          expr: expr,
+          type_ref: @type_refs[id]
+        }
+
         {id, node}
       end)
 
@@ -253,7 +266,8 @@ defmodule DmnSpike.Model do
       w: 150,
       h: 60,
       expr: %{rows: [], result: ""},
-      type_ref: nil
+      type_ref: nil,
+      description: ""
     }
 
     {%{m | nodes: Map.put(m.nodes, id, node), next: n + 1}, id}
@@ -300,6 +314,14 @@ defmodule DmnSpike.Model do
 
   def rename(%__MODULE__{} = m, id, name), do: put_in(m.nodes[id].name, name)
   def set_type_ref(%__MODULE__{} = m, id, ref), do: put_in(m.nodes[id].type_ref, ref)
+  def description(n), do: Map.get(n, :description) || ""
+  def set_description(%__MODULE__{} = m, id, text), do: put_in(m.nodes[id].description, text)
+
+  @doc "The nodes `id` requires and the nodes that require `id`, as `{id, name}` lists."
+  def neighbours(%__MODULE__{} = m, id) do
+    pick = fn pairs -> for {other, kind} <- pairs, n = m.nodes[other], do: {n.id, n.name, kind} end
+    {pick.(for({f, t, k} <- m.edges, t == id, do: {f, k})), pick.(for({f, t, k} <- m.edges, f == id, do: {t, k}))}
+  end
 
   @doc "DMN requirement rules: input/decision -> decision (information), bkm -> decision/bkm (knowledge)."
   def connect(%__MODULE__{} = m, from, to) do

@@ -1152,6 +1152,107 @@
         stroke-linecap: round;
         stroke-linejoin: round;
       }
+
+      /* inspector tabs and the properties pane */
+      .dtabs {
+        display: inline-flex;
+        gap: 2px;
+        padding: 3px;
+        margin-bottom: 0.7rem;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+      .dtabs button {
+        height: 26px;
+        padding: 0 0.8rem;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12.5px;
+        box-shadow: none;
+      }
+      .dtabs button[aria-pressed="true"] {
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: 0 1px 2px var(--shadow);
+      }
+      .props {
+        display: grid;
+        grid-template-columns: minmax(16rem, 2fr) minmax(14rem, 1fr);
+        gap: 1.25rem;
+        align-items: start;
+        padding: 1rem;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
+      .props .desc {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .props textarea {
+        width: 100%;
+        min-height: 6rem;
+        resize: vertical;
+        font: 13.5px/1.5 var(--font);
+        color: var(--text);
+      }
+      .props dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.55rem 1rem;
+        margin: 0;
+        font-size: 13px;
+      }
+      .props dt {
+        color: var(--muted);
+        font-size: 12px;
+        padding-top: 0.2rem;
+      }
+      .props dd {
+        margin: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+      }
+      .props .none {
+        color: var(--muted);
+      }
+      .chip {
+        height: 24px;
+        padding: 0 0.6rem;
+        border-radius: 999px;
+        font-size: 12px;
+        background: var(--dec-fill);
+        border-color: var(--dec);
+        box-shadow: none;
+      }
+      .chip.knowledge {
+        background: var(--bkm-fill);
+        border-color: var(--bkm);
+      }
+      .node .info {
+        cursor: pointer;
+      }
+      .node .info circle {
+        fill: var(--surface);
+        stroke: var(--text);
+        stroke-width: 1.4;
+      }
+      .node .info text {
+        fill: var(--text);
+        font-family: Georgia, serif;
+      }
+      @media (max-width: 820px) {
+        .props {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
   <body>

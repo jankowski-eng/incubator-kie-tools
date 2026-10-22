@@ -113,7 +113,8 @@ defmodule DmnSpike.Dmn.Overlay do
 
   @doc "What decides whether an element has been edited: its modelled content and its incoming requirements."
   def fingerprint(%Model{} = m, node) do
-    {node.name, node.type, node.type_ref, node.expr, for({f, t, k} <- m.edges, t == node.id, do: {f, k}) |> Enum.sort()}
+    {node.name, node.type, node.type_ref, Model.description(node), node.expr,
+     for({f, t, k} <- m.edges, t == node.id, do: {f, k}) |> Enum.sort()}
   end
 
   defp req_ids({_, _, kids}) do
@@ -375,14 +376,28 @@ defmodule DmnSpike.Dmn.Overlay do
         else: Enum.map(named.("extensionElements"), &from_simple/1)
 
     handled =
-      ["variable", "informationRequirement", "knowledgeRequirement", "extensionElements", "encapsulatedLogic"] ++
+      [
+        "variable",
+        "description",
+        "informationRequirement",
+        "knowledgeRequirement",
+        "extensionElements",
+        "encapsulatedLogic"
+      ] ++
         @expr_tags
+
+    # an unchanged description keeps its original element (attributes included)
+    description =
+      case named.("description") do
+        [r | _] -> if(Dmn.text(r) == Model.description(node), do: [from_simple(r)], else: fresh.("description"))
+        [] -> fresh.("description")
+      end
 
     others = for r <- raw, Dmn.local(elem(r, 0)) not in handled, do: from_simple(r)
     kind = %{input: :input, decision: :decision, bkm: :bkm}[node.type]
 
     attrs = put_attrs(attrs, [{"id", node.id}, {"name", node.name}])
-    {:el, tag, attrs, sort_children(extension ++ variable ++ reqs ++ expression ++ others, kind)}
+    {:el, tag, attrs, sort_children(extension ++ description ++ variable ++ reqs ++ expression ++ others, kind)}
   end
 
   # the value of an input data node lives in our own extension element; other extension content is kept

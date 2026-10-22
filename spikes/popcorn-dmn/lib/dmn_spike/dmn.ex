@@ -112,7 +112,8 @@ defmodule DmnSpike.Dmn do
           expression_xml(n.expr)
       end
 
-    el(tag, [{"id", n.id}, {"name", n.name}], [var] ++ info ++ know ++ body)
+    desc = if Model.description(n) == "", do: [], else: [el("description", [], [n.description])]
+    el(tag, [{"id", n.id}, {"name", n.name}], desc ++ [var] ++ info ++ know ++ body)
   end
 
   @doc false
@@ -396,6 +397,7 @@ defmodule DmnSpike.Dmn do
       id: id,
       type: type,
       name: name,
+      description: find(kids, "description") |> text() || "",
       x: 0,
       y: 0,
       w: 150,

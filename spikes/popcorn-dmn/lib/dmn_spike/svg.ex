@@ -98,6 +98,7 @@ defmodule DmnSpike.Svg do
       ~s|<text id="nv-#{n.id}" class="nv" x="#{div(n.w, 2)}" y="45" text-anchor="middle" font-size="12">#{Fmt.esc(node_value_text(result))}</text>|,
       ~s|<g class="handle" data-handle="#{n.id}" transform="translate(#{div(n.w, 2)} 0)"><title>Drag onto a node that needs this one</title><circle r="10"/><path d="M0 4V-4M-3.5 -1L0 -4.5L3.5 -1"/></g>|,
       ~s|<g class="del" data-del="#{n.id}" transform="translate(#{n.w} 0)"><title>Delete (Del)</title><circle r="9"/><path d="M-3 -3L3 3M3 -3L-3 3"/></g>|,
+      ~s|<g id="info-#{n.id}">#{info(n)}</g>|,
       ~s|<g id="pad-#{n.id}">#{if n.id == selected, do: pad(n)}</g>|,
       "</g>"
     ]
@@ -109,6 +110,17 @@ defmodule DmnSpike.Svg do
     "bkm" => ~s|<path d="M-9 -2L-5 -6H9V6H-9Z" stroke-linejoin="round"/>|
   }
   @labels %{"decision" => "decision", "input" => "input data", "bkm" => "business knowledge"}
+
+  @doc "The small ⓘ on a node that has a description; its tooltip is the description."
+  def info(n) do
+    case Model.description(n) do
+      "" ->
+        ""
+
+      d ->
+        ~s|<g class="info" data-info="#{n.id}" transform="translate(0 0)"><title>#{Fmt.esc(d)}</title><circle r="9"/><text y="4" text-anchor="middle" font-size="11" font-weight="700">i</text></g>|
+    end
+  end
 
   @doc "Everything that floats around a selected node: its data type and create-and-connect buttons."
   def pad(n), do: [type_pill(n), create_buttons(n)] |> IO.iodata_to_binary()
