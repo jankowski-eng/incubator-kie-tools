@@ -3,21 +3,44 @@ defmodule DmnSpike.Svg do
 
   alias DmnSpike.{Fmt, Model}
 
-  def scene(%Model{} = m, values, selected) do
-    edges = m.edges |> Enum.with_index() |> Enum.map(fn {e, i} -> [~s|<g id="edge-#{i}">|, edge(m, e), "</g>"] end)
-    nodes = m.nodes |> Map.values() |> Enum.sort_by(& &1.id) |> Enum.map(&node(&1, values[&1.id], selected))
+  def scene(%Model{} = m, results, selected, sel_edge \\ nil) do
+    edges =
+      m.edges
+      |> Enum.with_index()
+      |> Enum.map(fn {e, i} -> [~s|<g id="edge-#{i}" class="#{edge_class(i == sel_edge)}" data-edge="#{i}">|, edge(m, e, i), "</g>"] end)
+
+    nodes =
+      m.nodes
+      |> Map.values()
+      |> Enum.sort_by(& &1.id)
+      |> Enum.map(&node(&1, results[&1.id], selected))
+
     IO.iodata_to_binary([edges, nodes])
   end
 
-  def edge(%Model{nodes: nodes}, {from, to, kind}) do
-    a = nodes[from]
-    b = nodes[to]
-    {x1, y1} = border(a, center(b))
-    {x2, y2} = border(b, center(a))
+  def edge_class(selected?), do: if(selected?, do: "edge sel", else: "edge")
+
+  def edge(%Model{nodes: nodes}, {from, to, kind}, i) do
+    {x1, y1, x2, y2} = endpoints(nodes[from], nodes[to])
     dash = if kind == :knowledge, do: ~s| stroke-dasharray="6 4"|, else: ""
     marker = if kind == :knowledge, do: "arrow-open", else: "arrow-fill"
 
-    ~s|<line x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}" stroke="currentColor"#{dash} marker-end="url(##{marker})"/>|
+    [
+      ~s|<line class="hit" x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}"/>|,
+      ~s|<line class="vis" x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}" stroke="currentColor"#{dash} marker-end="url(##{marker})"/>|
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  def endpoints(a, b) do
+    {x1, y1} = border(a, center(b))
+    {x2, y2} = border(b, center(a))
+    {x1, y1, x2, y2}
+  end
+
+  def preview(%Model{nodes: nodes}, from, {px, py}) do
+    {x1, y1} = border(nodes[from], {px, py})
+    ~s|<line x1="#{x1}" y1="#{y1}" x2="#{Float.round(px * 1.0, 1)}" y2="#{Float.round(py * 1.0, 1)}" stroke="currentColor" stroke-dasharray="3 3" marker-end="url(#arrow-fill)"/>|
   end
 
   def center(n), do: {n.x + n.w / 2, n.y + n.h / 2}
@@ -37,17 +60,39 @@ defmodule DmnSpike.Svg do
   defp min_num(a, :infinity), do: a
   defp min_num(a, b), do: min(a, b)
 
+  @doc "viewBox that fits every node with a margin, never smaller than the default canvas."
+  def viewbox(%Model{nodes: nodes}) when map_size(nodes) == 0, do: "0 0 820 370"
+
+  def viewbox(%Model{nodes: nodes}) do
+    ns = Map.values(nodes)
+    minx = min(0, Enum.min(Enum.map(ns, & &1.x)) - 30)
+    miny = min(0, Enum.min(Enum.map(ns, & &1.y)) - 30)
+    maxx = Enum.max(Enum.map(ns, &(&1.x + &1.w))) + 30
+    maxy = Enum.max(Enum.map(ns, &(&1.y + &1.h))) + 30
+    "#{minx} #{miny} #{max(maxx - minx, 820)} #{max(maxy - miny, 370)}"
+  end
+
   def transform(n), do: "translate(#{n.x} #{n.y})"
+
+  def node_class(selected?, invalid?),
+    do: "node" <> if(selected?, do: " sel", else: "") <> if(invalid?, do: " invalid", else: "")
 
   def node_value_text(nil), do: ""
   def node_value_text(%{value: v}), do: Fmt.short(v)
 
+  def node_title(nil), do: ""
+  def node_title(%{errors: errors}), do: Fmt.esc(Enum.join(errors, "\n"))
+
   defp node(n, result, selected) do
+    invalid? = result != nil and result.errors != []
+
     [
-      ~s|<g class="node#{if n.id == selected, do: " sel"}" data-id="#{n.id}" transform="#{transform(n)}">|,
+      ~s|<g class="#{node_class(n.id == selected, invalid?)}" data-id="#{n.id}" transform="#{transform(n)}">|,
+      ~s|<title id="tt-#{n.id}">#{node_title(result)}</title>|,
       shape(n),
-      ~s|<text x="#{div(n.w, 2)}" y="26" text-anchor="middle" font-size="13" fill="currentColor">#{Fmt.esc(n.name)}</text>|,
+      ~s|<text id="nm-#{n.id}" x="#{div(n.w, 2)}" y="26" text-anchor="middle" font-size="13" fill="currentColor">#{Fmt.esc(n.name)}</text>|,
       ~s|<text id="nv-#{n.id}" class="nv" x="#{div(n.w, 2)}" y="45" text-anchor="middle" font-size="12">#{Fmt.esc(node_value_text(result))}</text>|,
+      ~s|<circle class="handle" data-handle="#{n.id}" cx="#{div(n.w, 2)}" cy="0" r="7"><title>Drag to a node that requires this one</title></circle>|,
       "</g>"
     ]
   end

@@ -6,7 +6,7 @@ defmodule DmnSpikeTest do
   test "svg renders every node and edge, with arrow markers" do
     m = Model.sample()
     svg = Svg.scene(m, %{}, nil)
-    assert length(String.split(svg, "<line")) - 1 == length(m.edges)
+    assert length(String.split(svg, ~s(class="vis"))) - 1 == length(m.edges)
     assert length(String.split(svg, "data-id=")) - 1 == map_size(m.nodes)
     assert svg =~ "marker-end=\"url(#arrow-open)\""
     assert svg =~ "marker-end=\"url(#arrow-fill)\""
@@ -67,5 +67,99 @@ defmodule DmnSpikeTest do
     assert "Applicant Data" in names
     {new, caret} = Autocomplete.accept(text, String.length(text), start, names, Enum.find_index(names, &(&1 == "Applicant Data")))
     assert new == "if Applicant Data" and caret == String.length(new)
+  end
+
+  alias DmnSpike.{Layout, Types}
+
+  describe "data types" do
+    test "the sample DRD conforms to its types" do
+      r = Eval.run(Model.sample())
+      assert Enum.all?(r, fn {_, v} -> v.errors == [] end)
+    end
+
+    test "constraints and structure are checked" do
+      m = Model.sample()
+      d = &Decimal.new/1
+      assert Types.validate(m, d.(50), "tRatio") == []
+      assert Types.validate(m, d.(150), "tRatio") == ["violates constraint [0..100]"]
+      assert Types.validate(m, "maybe", "tVerdict") == [~s|violates constraint "Qualified", "Not qualified"|]
+      assert Types.validate(m, d.(7), "tRequested") == ["expected a structure"]
+      bad = %{"Amount" => d.(1), "Rate" => d.(25), "Term" => d.(100)}
+      assert ["Rate: violates constraint (0..20]", "Term: violates constraint 120, 180, 240, 360"] = Types.validate(m, bad, "tRequested")
+      assert Types.validate(m, "x", "number") == ["expected a number"]
+      assert Types.validate(m, nil, "tRatio") == []
+      assert Types.validate(m, 1, "nope") == ["unknown type nope"]
+    end
+
+    test "collections validate every item" do
+      m = %{Model.sample() | types: [%{Types.new_type("tList") | ref: "number", collection: true}]}
+      assert Types.validate(m, [Decimal.new(1), Decimal.new(2)], "tList") == []
+      assert Types.validate(m, [Decimal.new(1), "x"], "tList") == ["expected a number"]
+      assert Types.validate(m, Decimal.new(1), "tList") == ["expected a list"]
+    end
+
+    test "invalid constraint text is reported" do
+      assert %Feel.Error{} = Types.constraint_error(%{kind: :range, text: "[1.."})
+      assert Types.constraint_error(%{kind: :range, text: ">= 0"}) == nil
+    end
+
+    test "path edits and rename refactor references" do
+      m = Model.sample()
+      t = Types.update(m.types, [0, 1], &%{&1 | name: "Levy"})
+      assert Types.get(t, [0, 1]).name == "Levy"
+      assert length(Types.delete(t, [0, 0])) == 4 and length(Types.get(Types.delete(t, [0, 0]), [0]).components) == 3
+      m2 = Types.rename_top(m, 2, "tPercent")
+      assert m2.nodes["front"].type_ref == "tPercent" and Types.find(m2, "tPercent")
+    end
+  end
+
+  describe "editing the diagram" do
+    test "add_node places a uniquely named node centred on the drop point" do
+      {m, id} = Model.add_node(Model.sample(), "decision", 400, 300)
+      {m, id2} = Model.add_node(m, "decision", 10, 10)
+      assert %{x: 325, y: 270, name: "New decision"} = m.nodes[id]
+      assert m.nodes[id2].name == "New decision 2"
+    end
+
+    test "connect follows the DMN requirement rules" do
+      m = Model.sample()
+      assert {:error, "already connected"} = Model.connect(m, "app", "front")
+      assert {:error, "a node cannot require itself"} = Model.connect(m, "app", "app")
+      assert {:error, "that would create a cycle"} = Model.connect(m, "loan", "front")
+      assert {:error, "input cannot be required by input"} = Model.connect(m, "app", "prod")
+      {m, id} = Model.add_node(m, "decision", 0, 0)
+      assert {:ok, m2} = Model.connect(m, "front", id)
+      assert {_, _, :info} = List.last(m2.edges)
+      assert {:ok, m3} = Model.connect(m, "dti", id)
+      assert {_, _, :knowledge} = List.last(m3.edges)
+    end
+
+    test "delete_node drops its edges" do
+      m = Model.delete_node(Model.sample(), "front")
+      refute Map.has_key?(m.nodes, "front")
+      assert Enum.all?(m.edges, fn {a, b, _} -> a != "front" and b != "front" end)
+    end
+  end
+
+  describe "auto layout" do
+    test "layers respect requirements and nodes do not overlap" do
+      m = Layout.run(Model.sample())
+      for {from, to, _} <- m.edges, do: assert(m.nodes[from].y > m.nodes[to].y)
+
+      boxes = Map.values(m.nodes)
+
+      for a <- boxes, b <- boxes, a.id < b.id do
+        overlap? = a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h
+        refute overlap?, "#{a.name} overlaps #{b.name}"
+      end
+    end
+
+    test "is stable (idempotent) and handles disconnected and empty models" do
+      m = Layout.run(Model.sample())
+      assert Layout.run(m) == m
+      {m2, _} = Model.add_node(Model.sample(), "input", 0, 0)
+      assert Layout.run(m2).nodes |> map_size() == 8
+      assert Layout.run(%Model{}) == %Model{}
+    end
   end
 end

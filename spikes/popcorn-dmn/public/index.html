@@ -32,7 +32,7 @@
       body {
         font-family: system-ui, sans-serif;
         margin: 1rem;
-        max-width: 900px;
+        max-width: 1100px;
       }
       header {
         display: flex;
@@ -208,41 +208,194 @@
       .ac li:hover {
         background: color-mix(in srgb, var(--accent) 28%, Canvas);
       }
+      svg#drd {
+        flex: 1;
+        min-width: 0;
+      }
+      .canvas {
+        display: flex;
+        gap: 0.5rem;
+        align-items: flex-start;
+      }
+      #palette {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        width: 9.5rem;
+        flex: none;
+      }
+      #palette small {
+        color: var(--muted);
+        font-size: 0.72rem;
+        line-height: 1.3;
+      }
+      .pal {
+        border: 1.2px solid currentColor;
+        padding: 0.5rem 0.4rem;
+        text-align: center;
+        font-size: 0.8rem;
+        cursor: grab;
+        background: Canvas;
+      }
+      .pal.input {
+        border-radius: 999px;
+      }
+      .pal.bkm {
+        clip-path: polygon(14px 0, 100% 0, 100% 100%, 0 100%, 0 14px);
+        border-color: transparent;
+        background: color-mix(in srgb, currentColor 14%, Canvas);
+      }
+      .tabs {
+        display: flex;
+        margin-right: 0.75rem;
+      }
+      .tabs button {
+        border-radius: 0;
+      }
+      .tabs button[aria-pressed="true"] {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+      }
+      .node .handle {
+        display: none;
+        fill: var(--accent);
+        stroke: Canvas;
+        stroke-width: 2;
+        cursor: crosshair;
+      }
+      .node.sel .handle {
+        display: block;
+      }
+      .node.invalid .shape {
+        stroke: var(--bad);
+        stroke-dasharray: 5 3;
+      }
+      .edge .hit {
+        stroke: transparent;
+        stroke-width: 12;
+        cursor: pointer;
+      }
+      .edge.sel .vis {
+        stroke: var(--accent);
+        stroke-width: 2.6;
+      }
+      #preview {
+        pointer-events: none;
+      }
+      .nodehead {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 0.4rem;
+      }
+      .nodehead .nname {
+        font: 600 15px system-ui;
+        padding: 0.25rem 0.4rem;
+        min-width: 14rem;
+      }
+      .nodehead select {
+        font: inherit;
+      }
+      .errs {
+        color: var(--bad);
+        font-size: 0.85rem;
+      }
+      table.types {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+      }
+      table.types th,
+      table.types td {
+        border: 1px solid var(--line);
+        padding: 0.2rem 0.4rem;
+        vertical-align: top;
+        text-align: left;
+      }
+      table.types thead th {
+        background: color-mix(in srgb, var(--accent) 12%, Canvas);
+      }
+      table.types input[data-op="tname"] {
+        font:
+          13px ui-monospace,
+          monospace;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      table.types td.cons {
+        min-width: 16rem;
+      }
+      table.types td.cons select {
+        margin-bottom: 0.2rem;
+      }
+      table.types small.bad {
+        color: var(--bad);
+        display: block;
+      }
+      table.types td.acts {
+        white-space: nowrap;
+        width: 1%;
+      }
+      [hidden] {
+        display: none !important;
+      }
     </style>
   </head>
   <body>
     <header>
-      <button id="undo" disabled>↶ Undo</button><button id="redo" disabled>↷ Redo</button>
+      <nav class="tabs">
+        <button data-click="tab:editor" aria-pressed="true">Editor</button>
+        <button data-click="tab:types" aria-pressed="false">Data types</button>
+      </nav>
+      <button data-click="undo" disabled>↶ Undo</button><button data-click="redo" disabled>↷ Redo</button>
+      <button data-click="layout" title="Arrange nodes in layers">Auto-layout</button>
       <span id="status">Starting Popcorn...</span>
     </header>
-    <svg id="drd" viewBox="0 0 820 370">
-      <defs>
-        <marker
-          id="arrow-fill"
-          viewBox="0 0 10 10"
-          refX="10"
-          refY="5"
-          markerWidth="9"
-          markerHeight="9"
-          orient="auto-start-reverse"
-        >
-          <path d="M0 0L10 5L0 10z" fill="currentColor" />
-        </marker>
-        <marker
-          id="arrow-open"
-          viewBox="0 0 10 10"
-          refX="10"
-          refY="5"
-          markerWidth="9"
-          markerHeight="9"
-          orient="auto-start-reverse"
-        >
-          <path d="M0 0L10 5L0 10" fill="none" stroke="currentColor" stroke-width="1.4" />
-        </marker>
-      </defs>
-      <g id="scene"></g>
-    </svg>
-    <div id="panel"></div>
+    <section id="view-editor">
+      <div class="canvas">
+        <div id="palette" title="Drag onto the canvas">
+          <div class="pal decision" draggable="true" data-kind="decision">Decision</div>
+          <div class="pal input" draggable="true" data-kind="input">Input data</div>
+          <div class="pal bkm" draggable="true" data-kind="bkm">Business knowledge</div>
+          <small
+            >Drag onto the canvas. Drag a selected node's top handle onto another node to connect. Delete removes the
+            selection.</small
+          >
+        </div>
+        <svg id="drd" viewBox="0 0 820 370">
+          <defs>
+            <marker
+              id="arrow-fill"
+              viewBox="0 0 10 10"
+              refX="10"
+              refY="5"
+              markerWidth="9"
+              markerHeight="9"
+              orient="auto-start-reverse"
+            >
+              <path d="M0 0L10 5L0 10z" fill="currentColor" />
+            </marker>
+            <marker
+              id="arrow-open"
+              viewBox="0 0 10 10"
+              refX="10"
+              refY="5"
+              markerWidth="9"
+              markerHeight="9"
+              orient="auto-start-reverse"
+            >
+              <path d="M0 0L10 5L0 10" fill="none" stroke="currentColor" stroke-width="1.4" />
+            </marker>
+          </defs>
+          <g id="scene"></g>
+          <g id="preview"></g>
+        </svg>
+      </div>
+      <div id="panel"></div>
+    </section>
+    <section id="view-types" hidden><div id="types"></div></section>
     <script type="module">
       import { Popcorn } from "./out/index.mjs";
       const t0 = performance.now();

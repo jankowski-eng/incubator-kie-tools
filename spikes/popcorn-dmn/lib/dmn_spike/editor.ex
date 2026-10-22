@@ -1,12 +1,12 @@
 defmodule DmnSpike.Editor do
   @moduledoc """
   Owns the model, history and selection. All logic is Elixir; the JS below only
-  forwards DOM events (pointer capture and screen->SVG coordinates need the DOM)
-  and applies small patches.
+  forwards DOM events (pointer capture, drag & drop and screen->SVG coordinates
+  need the DOM) and applies small `[kind, selector, ...]` patches.
   """
   use GenServer
 
-  alias DmnSpike.{Autocomplete, Eval, Model, Panel, Svg}
+  alias DmnSpike.{Autocomplete, Eval, Fmt, Layout, Model, Panel, Svg, Types, TypesPanel}
   alias Popcorn.JS
 
   @name :editor
@@ -19,6 +19,7 @@ defmodule DmnSpike.Editor do
       if (k === 'html') el.innerHTML = a;
       else if (k === 'attr') el.setAttribute(a, b);
       else if (k === 'disabled') el.disabled = a;
+      else if (k === 'hidden') el.hidden = a;
       else if (k === 'value') { el.value = a; el.setSelectionRange(b, b); el.focus(); }
     }
   }
@@ -27,19 +28,42 @@ defmodule DmnSpike.Editor do
   @events_js """
   (_, {send}) => {
     const $ = (s) => document.querySelector(s);
+    const ed = (m) => send('editor', m);
     const svg = $('#drd'), pt = svg.createSVGPoint();
     const at = (e) => { pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); };
-    const ed = (m) => send('editor', m);
-    let id = null;
-    svg.addEventListener('pointerdown', (e) => {
-      const g = e.target.closest('[data-id]');
-      if (!g) return;
-      id = g.dataset.id; svg.setPointerCapture(e.pointerId);
-      const p = at(e); ed({t: 'down', id, x: p.x, y: p.y});
-    });
-    svg.addEventListener('pointermove', (e) => { if (id) { const p = at(e); ed({t: 'move', x: p.x, y: p.y}); } });
-    svg.addEventListener('pointerup', () => { if (id) ed({t: 'up'}); id = null; });
 
+    // diagram: drag nodes, connect from a node's handle, select edges
+    let mode = null;
+    svg.addEventListener('pointerdown', (e) => {
+      const h = e.target.closest('[data-handle]'), g = e.target.closest('[data-id]'), l = e.target.closest('[data-edge]');
+      if (h) { mode = 'connect'; svg.setPointerCapture(e.pointerId); ed({t: 'cstart', id: h.dataset.handle}); }
+      else if (g) { mode = 'drag'; svg.setPointerCapture(e.pointerId); const p = at(e); ed({t: 'down', id: g.dataset.id, x: p.x, y: p.y}); }
+      else if (l) ed({t: 'edge', i: Number(l.dataset.edge)});
+    });
+    svg.addEventListener('pointermove', (e) => {
+      if (!mode) return;
+      const p = at(e);
+      ed({t: mode === 'drag' ? 'move' : 'cmove', x: p.x, y: p.y});
+    });
+    svg.addEventListener('pointerup', (e) => {
+      if (mode === 'drag') ed({t: 'up'});
+      if (mode === 'connect') {
+        const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-id]');
+        ed({t: 'cend', to: hit ? hit.dataset.id : null});
+      }
+      mode = null;
+    });
+
+    // palette: drag new elements onto the canvas
+    $('#palette').addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', e.target.closest('[data-kind]').dataset.kind));
+    svg.addEventListener('dragover', (e) => e.preventDefault());
+    svg.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const kind = e.dataTransfer.getData('text/plain'), p = at(e);
+      if (kind) ed({t: 'add', kind, x: p.x, y: p.y});
+    });
+
+    // expression cells (highlighted textareas with autocomplete)
     const panel = $('#panel');
     const cell = (e, t) => ({t, cell: e.target.dataset.cell, text: e.target.value, caret: e.target.selectionStart});
     panel.addEventListener('input', (e) => { if (e.target.dataset.cell) ed(cell(e, 'cell')); });
@@ -50,8 +74,8 @@ defmodule DmnSpike.Editor do
     panel.addEventListener('keydown', (e) => {
       if (!e.target.dataset.cell) return;
       if (e.key === 'Enter') e.preventDefault();
-      if ((e.key === 'Tab' && !e.shiftKey) && panel.querySelector('.ac li')) { e.preventDefault(); ed({...cell(e, 'ac'), pick: 0}); }
-      if (e.key === 'Escape') ed({...cell(e, 'focus'), text: e.target.value, caret: -1});
+      if (e.key === 'Tab' && !e.shiftKey && panel.querySelector('.ac li')) { e.preventDefault(); ed({...cell(e, 'ac'), pick: 0}); }
+      if (e.key === 'Escape') ed({...cell(e, 'focus'), caret: -1});
     });
     panel.addEventListener('mousedown', (e) => {
       const li = e.target.closest('[data-pick]');
@@ -60,14 +84,30 @@ defmodule DmnSpike.Editor do
       const ta = $(`[data-cell="${li.dataset.cell}"]`);
       ed({t: 'ac', cell: li.dataset.cell, text: ta.value, caret: ta.selectionStart, pick: Number(li.dataset.pick)});
     });
-    document.addEventListener('keydown', (e) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const k = e.key.toLowerCase();
-      if (k === 'z') { e.preventDefault(); ed({t: e.shiftKey ? 'redo' : 'undo'}); }
-      if (k === 'y') { e.preventDefault(); ed({t: 'redo'}); }
+
+    // generic controls: data-op (inputs/selects/checkboxes) and data-click (buttons)
+    const op = (e, kind) => {
+      const d = e.target.dataset;
+      if (!d.op) return;
+      ed({t: 'op', op: d.op, path: d.path ?? null, id: d.id ?? null, kind, value: e.target.type === 'checkbox' ? e.target.checked : e.target.value});
+    };
+    const textual = (el) => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'checkbox');
+    document.addEventListener('input', (e) => { if (textual(e.target)) op(e, 'input'); });
+    document.addEventListener('change', (e) => op(e, 'change'));
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-click]');
+      if (b) ed({t: 'click', what: b.dataset.click});
     });
-    $('#undo').onclick = () => ed({t: 'undo'});
-    $('#redo').onclick = () => ed({t: 'redo'});
+    document.addEventListener('keydown', (e) => {
+      if (e.target.closest('input, textarea, select')) {
+        if ((e.metaKey || e.ctrlKey) && ['z', 'y'].includes(e.key.toLowerCase())) e.preventDefault();
+        else return;
+      }
+      const k = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && k === 'z') { e.preventDefault(); ed({t: e.shiftKey ? 'redo' : 'undo'}); }
+      else if ((e.metaKey || e.ctrlKey) && k === 'y') { e.preventDefault(); ed({t: 'redo'}); }
+      else if (k === 'delete' || k === 'backspace') { e.preventDefault(); ed({t: 'delete'}); }
+    });
   }
   """
 
@@ -75,8 +115,12 @@ defmodule DmnSpike.Editor do
 
   @impl true
   def init(_) do
-    model = Model.sample()
-    {:ok, %{model: model, past: [], future: [], selected: "front", drag: nil, group: nil, ac: nil}, {:continue, :setup}}
+    state = %{
+      model: Model.sample(), past: [], future: [], selected: "front", sel_edge: nil,
+      drag: nil, group: nil, connect: nil, tab: "editor"
+    }
+
+    {:ok, state, {:continue, :setup}}
   end
 
   @impl true
@@ -91,46 +135,104 @@ defmodule DmnSpike.Editor do
   def handle_info({:wasm, msg}, state), do: {:noreply, event(msg, state)}
   def handle_info(_other, state), do: {:noreply, state}
 
-  # --- events -------------------------------------------------------------
+  # --- diagram events -------------------------------------------------------------
 
   defp event(%{"t" => "down", "id" => id, "x" => x, "y" => y}, state) do
     n = state.model.nodes[id]
-    state = %{state | drag: {id, x - n.x, y - n.y, false}}
-    select(state, id)
+    select(%{state | drag: {id, x - n.x, y - n.y, false}}, {:node, id})
   end
+
+  defp event(%{"t" => "edge", "i" => i}, state), do: select(state, {:edge, i})
 
   defp event(%{"t" => "move", "x" => x, "y" => y}, %{drag: {id, dx, dy, started?}} = state) do
     state = if started?, do: state, else: push_history(state, nil)
     model = Model.move(state.model, id, x - dx, y - dy)
-    n = model.nodes[id]
 
     ops =
-      [["attr", ~s|[data-id="#{id}"]|, "transform", Svg.transform(n)]] ++
-        for {e, i} <- Model.edges_of(model, id), do: ["html", "#edge-#{i}", Svg.edge(model, e)]
+      [["attr", ~s|[data-id="#{id}"]|, "transform", Svg.transform(model.nodes[id])]] ++
+        for {e, i} <- Model.edges_of(model, id), do: ["html", "#edge-#{i}", Svg.edge(model, e, i)]
 
     patch(ops)
     %{state | model: model, drag: {id, dx, dy, true}}
   end
 
-  defp event(%{"t" => "up"}, state), do: %{state | drag: nil}
+  defp event(%{"t" => "up"}, state) do
+    patch([["attr", "#drd", "viewBox", Svg.viewbox(state.model)]])
+    %{state | drag: nil}
+  end
+
+  defp event(%{"t" => "cstart", "id" => id}, state), do: %{state | connect: id}
+
+  defp event(%{"t" => "cmove", "x" => x, "y" => y}, %{connect: from} = state) when from != nil do
+    patch([["html", "#preview", Svg.preview(state.model, from, {x, y})]])
+    state
+  end
+
+  defp event(%{"t" => "cend", "to" => to}, %{connect: from} = state) when from != nil do
+    patch([["html", "#preview", ""]])
+    state = %{state | connect: nil}
+
+    with true <- is_binary(to), {:ok, model} <- Model.connect(state.model, from, to) do
+      state |> push_history(nil) |> Map.put(:model, model) |> render_all(true)
+    else
+      {:error, reason} -> say(state, "✗ #{reason}")
+      _ -> state
+    end
+  end
+
+  defp event(%{"t" => "add", "kind" => kind, "x" => x, "y" => y}, state) do
+    state = push_history(state, nil)
+    {model, id} = Model.add_node(state.model, kind, x, y)
+    render_all(%{state | model: model, selected: id, sel_edge: nil}, true)
+  end
+
+  defp event(%{"t" => "delete"}, %{sel_edge: i} = state) when i != nil do
+    state |> push_history(nil) |> Map.update!(:model, &Model.delete_edge(&1, i)) |> Map.put(:sel_edge, nil) |> render_all(true)
+  end
+
+  defp event(%{"t" => "delete"}, %{selected: id} = state) when id != nil do
+    state |> push_history(nil) |> Map.update!(:model, &Model.delete_node(&1, id)) |> Map.put(:selected, nil) |> render_all(true)
+  end
+
+  defp event(%{"t" => "click", "what" => "layout"}, state) do
+    state = push_history(state, nil)
+    render_all(%{state | model: Layout.run(state.model)}, true)
+  end
+
+  defp event(%{"t" => "click", "what" => "tab:" <> tab}, state), do: render_all(%{state | tab: tab}, true)
+  defp event(%{"t" => "click", "what" => w}, state) when w in ["undo", "redo"], do: event(%{"t" => w}, state)
+
+  defp event(%{"t" => "click", "what" => "add-type"}, state) do
+    names = MapSet.new(state.model.types, & &1.name)
+    name = Enum.find(for(i <- 1..99, do: "tNewType#{i}"), &(not MapSet.member?(names, &1)))
+    edit_types(state, fn types -> types ++ [Types.new_type(name)] end)
+  end
+
+  defp event(%{"t" => "click", "what" => "add-child:" <> p}, state),
+    do: edit_types(state, &Types.add_child(&1, path(p), Types.new_type("field")))
+
+  defp event(%{"t" => "click", "what" => "del-type:" <> p}, state),
+    do: edit_types(state, &Types.delete(&1, path(p)))
+
+  defp event(%{"t" => "undo"}, %{past: [prev | past]} = state),
+    do: render_all(%{state | model: prev, past: past, future: [state.model | state.future], group: nil}, true)
+
+  defp event(%{"t" => "redo"}, %{future: [next | future]} = state),
+    do: render_all(%{state | model: next, future: future, past: [state.model | state.past], group: nil}, true)
+
+  # --- expression cells -------------------------------------------------------------
 
   defp event(%{"t" => "focus"} = msg, state), do: show_ac(msg, state)
 
   defp event(%{"t" => "cell", "cell" => cell, "text" => text} = msg, state) do
     {id, idx} = parse_cell(cell)
-    key = {:cell, id, idx}
-    state = if state.group == key, do: state, else: push_history(state, key)
+    state = push_history(state, {:cell, id, idx}, :merge)
     state = %{state | model: Model.set_text(state.model, id, idx, text)}
     {us, results} = :timer.tc(fn -> Eval.run(state.model) end)
-
     result = Enum.at(results[id].cells, idx)
 
-    ops =
-      [["html", "#hl-#{id}-#{idx}", Panel.hl(text, result)]] ++
-        value_ops(state.model, id, results) ++ node_value_ops(state.model, results) ++ status_ops(state, us)
-
-    patch(ops)
-    show_ac(msg, %{state | group: key})
+    patch([["html", "#hl-#{id}-#{idx}", Panel.hl(text, result)] | refresh_ops(state, results, us)])
+    show_ac(msg, state)
   end
 
   defp event(%{"t" => "ac", "cell" => cell, "text" => text, "caret" => caret, "pick" => pick} = msg, state) do
@@ -146,41 +248,131 @@ defmodule DmnSpike.Editor do
     end
   end
 
-  defp event(%{"t" => "undo"}, %{past: [prev | past]} = state) do
-    render_all(%{state | model: prev, past: past, future: [state.model | state.future], group: nil}, true)
+  # --- node and data type controls -----------------------------------------------------
+
+  defp event(%{"t" => "op", "op" => "nname", "id" => id, "value" => v}, state) do
+    state = push_history(state, {:nname, id}, :merge)
+    state = %{state | model: Model.rename(state.model, id, v)}
+    patch([["html", "#nm-#{id}", Fmt.esc(v)] | refresh_ops(state)])
+    state
   end
 
-  defp event(%{"t" => "redo"}, %{future: [next | future]} = state) do
-    render_all(%{state | model: next, future: future, past: [state.model | state.past], group: nil}, true)
+  defp event(%{"t" => "op", "op" => "ntype", "id" => id, "value" => v}, state) do
+    state = push_history(state, nil)
+    state = %{state | model: Model.set_type_ref(state.model, id, if(v == "", do: nil, else: v))}
+    patch(refresh_ops(state))
+    state
+  end
+
+  defp event(%{"t" => "op", "op" => "tname", "path" => p, "value" => v, "kind" => kind}, state) do
+    path = path(p)
+    state = push_history(state, {:tname, p}, :merge)
+
+    model =
+      case path do
+        [i] -> Types.rename_top(state.model, i, v)
+        _ -> %{state.model | types: Types.update(state.model.types, path, &%{&1 | name: v})}
+      end
+
+    state = %{state | model: model}
+    patch(refresh_ops(state))
+    if kind == "change", do: patch_types(state)
+    state
+  end
+
+  defp event(%{"t" => "op", "op" => "tref", "path" => p, "value" => v}, state),
+    do: edit_types(state, &Types.update(&1, path(p), fn t -> %{t | ref: if(v == "", do: nil, else: v)} end))
+
+  defp event(%{"t" => "op", "op" => "tcoll", "path" => p, "value" => v}, state),
+    do: edit_types(state, &Types.update(&1, path(p), fn t -> %{t | collection: v == true} end))
+
+  defp event(%{"t" => "op", "op" => "ckind", "path" => p, "value" => v}, state) do
+    edit_types(state, fn types ->
+      Types.update(types, path(p), fn t ->
+        text = (t.constraint && t.constraint.text) || ""
+        %{t | constraint: if(v == "", do: nil, else: %{kind: String.to_existing_atom(v), text: text})}
+      end)
+    end)
+  end
+
+  defp event(%{"t" => "op", "op" => "ctext", "path" => p, "value" => v}, state) do
+    state = push_history(state, {:ctext, p}, :merge)
+    types = Types.update(state.model.types, path(p), fn t -> %{t | constraint: %{t.constraint | text: v}} end)
+    state = %{state | model: %{state.model | types: types}}
+    c = Types.get(types, path(p)).constraint
+    err = Types.constraint_error(c)
+
+    patch([
+      ["html", "#chl-#{p}", DmnSpike.Highlight.html(v, err && err.span)],
+      ["html", "#cmsg-#{p}", TypesPanel.message(err)]
+      | refresh_ops(state)
+    ])
+
+    state
   end
 
   defp event(_other, state), do: state
 
-  # --- helpers ------------------------------------------------------------
+  # --- helpers ---------------------------------------------------------------------------
+
+  defp path(p), do: p |> String.split("-") |> Enum.map(&String.to_integer/1)
 
   defp parse_cell(cell) do
     [id, idx] = String.split(cell, ":")
     {id, String.to_integer(idx)}
   end
 
-  defp push_history(state, group) do
+  # snapshot for undo; `:merge` coalesces consecutive edits with the same key
+  defp push_history(state, group, mode \\ :always)
+  defp push_history(%{group: key} = state, key, :merge) when key != nil, do: state
+
+  defp push_history(state, group, _mode) do
     state = %{state | past: Enum.take([state.model | state.past], 100), future: [], group: group}
     patch(history_ops(state))
     state
   end
 
-  defp select(%{selected: id} = state, id), do: state
+  defp edit_types(state, fun) do
+    state = push_history(state, nil)
+    state = %{state | model: %{state.model | types: fun.(state.model.types)}}
+    patch_types(state)
+    patch(refresh_ops(state))
+    state
+  end
 
-  defp select(state, id) do
+  defp select(%{selected: id, sel_edge: nil} = state, {:node, id}), do: state
+
+  defp select(state, target) do
+    results = Eval.run(state.model)
+    unselect = deselect_ops(state)
+
+    {state, ops} =
+      case target do
+        {:node, id} ->
+          {%{state | selected: id, sel_edge: nil},
+           [
+             ["attr", ~s|[data-id="#{id}"]|, "class", Svg.node_class(true, results[id].errors != [])],
+             ["html", "#panel", Panel.render(state.model, id, results)]
+           ]}
+
+        {:edge, i} ->
+          {%{state | sel_edge: i}, [["attr", "#edge-#{i}", "class", Svg.edge_class(true)]]}
+      end
+
+    patch(unselect ++ ops)
+    state
+  end
+
+  defp deselect_ops(state) do
     results = Eval.run(state.model)
 
-    patch([
-      ["attr", ~s|[data-id="#{state.selected}"]|, "class", "node"],
-      ["attr", ~s|[data-id="#{id}"]|, "class", "node sel"],
-      ["html", "#panel", Panel.render(state.model, id, results)]
-    ])
+    node =
+      if state.selected && state.model.nodes[state.selected],
+        do: [["attr", ~s|[data-id="#{state.selected}"]|, "class", Svg.node_class(false, results[state.selected].errors != [])]],
+        else: []
 
-    %{state | selected: id}
+    edge = if state.sel_edge, do: [["attr", "#edge-#{state.sel_edge}", "class", Svg.edge_class(false)]], else: []
+    node ++ edge
   end
 
   defp show_ac(%{"cell" => cell, "text" => text, "caret" => caret}, state) do
@@ -190,33 +382,60 @@ defmodule DmnSpike.Editor do
     state
   end
 
-  defp value_ops(model, id, results) do
-    for {_, idx} <- Enum.with_index(Model.cells(model.nodes[id])) do
-      ["html", "#val-#{id}-#{idx}", Panel.cell_view(Enum.at(results[id].cells, idx))]
-    end
-  end
+  defp history_ops(state),
+    do: [["disabled", "[data-click=undo]", state.past == []], ["disabled", "[data-click=redo]", state.future == []]]
 
-  defp node_value_ops(model, results) do
-    for {nid, _} <- model.nodes, do: ["html", "#nv-#{nid}", Svg.node_value_text(results[nid])]
-  end
+  defp patch_types(state), do: patch([["html", "#types", TypesPanel.render(state.model)]])
 
-  defp history_ops(state) do
-    [["disabled", "#undo", state.past == []], ["disabled", "#redo", state.future == []]]
-  end
-
-  defp status_ops(state, us) do
+  # patches for everything that depends on evaluation: value badges, validation, shown table
+  defp refresh_ops(state, results \\ nil, us \\ nil) do
+    {us, results} = if results, do: {us, results}, else: :timer.tc(fn -> Eval.run(state.model) end)
     n = state.model.nodes |> Map.values() |> Enum.map(&length(Model.cells(&1))) |> Enum.sum()
-    [["html", "#status", "evaluated #{n} cells in #{Float.round(us / 1000, 1)} ms"]] ++ history_ops(state)
+
+    node_ops =
+      for {nid, node} <- state.model.nodes, r = results[nid], reduce: [] do
+        acc ->
+          [
+            ["html", "#nv-#{nid}", Svg.node_value_text(r)],
+            ["html", "#tt-#{nid}", Svg.node_title(r)],
+            ["attr", ~s|[data-id="#{nid}"]|, "class", Svg.node_class(nid == state.selected, r.errors != [])]
+            | acc
+          ] ++ if(node.id == state.selected, do: [["html", "#nerr-#{nid}", Panel.errors_html(r)]], else: [])
+      end
+
+    shown =
+      case state.selected && results[state.selected] do
+        %{cells: cells} ->
+          for {c, i} <- Enum.with_index(cells), do: ["html", "#val-#{state.selected}-#{i}", Panel.cell_view(c)]
+
+        _ ->
+          []
+      end
+
+    node_ops ++ shown ++ [["html", "#status", "evaluated #{n} cells in #{Float.round(us / 1000, 1)} ms"]] ++ history_ops(state)
+  end
+
+  defp say(state, msg) do
+    patch([["html", "#status", Fmt.esc(msg)]])
+    state
   end
 
   defp render_all(state, return_state? \\ false) do
     {us, results} = :timer.tc(fn -> Eval.run(state.model) end)
+    selected = if state.model.nodes[state.selected], do: state.selected, else: nil
+    state = %{state | selected: selected, group: nil}
 
     patch(
       [
-        ["html", "#scene", Svg.scene(state.model, results, state.selected)],
-        ["html", "#panel", Panel.render(state.model, state.selected, results)]
-      ] ++ status_ops(state, us)
+        ["attr", "#drd", "viewBox", Svg.viewbox(state.model)],
+        ["html", "#scene", Svg.scene(state.model, results, state.selected, state.sel_edge)],
+        ["html", "#panel", Panel.render(state.model, state.selected, results)],
+        ["html", "#types", TypesPanel.render(state.model)],
+        ["hidden", "#view-editor", state.tab != "editor"],
+        ["hidden", "#view-types", state.tab != "types"],
+        ["attr", "[data-click='tab:editor']", "aria-pressed", to_string(state.tab == "editor")],
+        ["attr", "[data-click='tab:types']", "aria-pressed", to_string(state.tab == "types")]
+      ] ++ refresh_ops(state, results, us)
     )
 
     if return_state?, do: state, else: :ok

@@ -23,7 +23,9 @@ defmodule DmnSpike.Eval do
         env =
           for d <- deps, Map.has_key?(acc, d), into: %{}, do: {m.nodes[d].name, acc[d].value}
 
-        Map.put(acc, id, eval_node(m.nodes[id], env))
+        node_result = eval_node(m.nodes[id], env)
+        errors = DmnSpike.Types.validate(m, node_result.value, m.nodes[id].type_ref)
+        Map.put(acc, id, Map.put(node_result, :errors, errors))
     end
   end
 

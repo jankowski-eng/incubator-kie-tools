@@ -5,7 +5,17 @@ defmodule DmnSpike.Model do
   `from` is a requirement of `to`.
   """
 
-  defstruct nodes: %{}, edges: []
+  @type_refs %{
+    "loan" => "tVerdict",
+    "back" => "tRatio",
+    "front" => "tRatio",
+    "dti" => "number",
+    "piti" => "number",
+    "app" => "tApplicant",
+    "prod" => "tRequested"
+  }
+
+  defstruct nodes: %{}, edges: [], types: [], next: 1
 
   def sample do
     nodes =
@@ -34,7 +44,8 @@ defmodule DmnSpike.Model do
       ]
       |> Map.new(fn {id, type, name, x, y, rows, result} ->
         expr = %{rows: Enum.map(rows, fn {n, t} -> %{name: n, text: t} end), result: result}
-        {id, %{id: id, type: type, name: name, x: x, y: y, w: 150, h: 60, expr: expr}}
+        node = %{id: id, type: type, name: name, x: x, y: y, w: 150, h: 60, expr: expr, type_ref: @type_refs[id]}
+        {id, node}
       end)
 
     edges = [
@@ -48,7 +59,7 @@ defmodule DmnSpike.Model do
       {"piti", "loan", :knowledge}
     ]
 
-    %__MODULE__{nodes: nodes, edges: edges}
+    %__MODULE__{nodes: nodes, edges: edges, types: DmnSpike.Types.sample()}
   end
 
   def move(%__MODULE__{} = m, id, x, y), do: update_in(m.nodes[id], &%{&1 | x: round(x), y: round(y)})
@@ -74,5 +85,63 @@ defmodule DmnSpike.Model do
     reqs = for {from, ^id, _} <- m.edges, do: m.nodes[from].name
     rows = m.nodes[id].expr.rows |> Enum.take(idx) |> Enum.map(& &1.name)
     rows ++ reqs
+  end
+
+  # --- structure edits ------------------------------------------------------
+
+  @kinds %{"decision" => {:decision, "decision"}, "input" => {:input, "input data"}, "bkm" => {:bkm, "business knowledge"}}
+
+  @doc "Adds a node of `kind` centred on `{x, y}`; returns `{model, id}`."
+  def add_node(%__MODULE__{} = m, kind, x, y) do
+    {type, label} = Map.fetch!(@kinds, kind)
+    id = "n#{m.next}"
+    names = MapSet.new(Map.values(m.nodes), & &1.name)
+    base = "New #{label}"
+    name = Enum.find([base | Enum.map(2..99, &"#{base} #{&1}")], &(not MapSet.member?(names, &1)))
+
+    node = %{
+      id: id, type: type, name: name, x: round(x - 75), y: round(y - 30), w: 150, h: 60,
+      expr: %{rows: [], result: ""}, type_ref: nil
+    }
+
+    {%{m | nodes: Map.put(m.nodes, id, node), next: m.next + 1}, id}
+  end
+
+  def delete_node(%__MODULE__{} = m, id) do
+    %{m | nodes: Map.delete(m.nodes, id), edges: Enum.reject(m.edges, fn {a, b, _} -> a == id or b == id end)}
+  end
+
+  def delete_edge(%__MODULE__{} = m, i), do: %{m | edges: List.delete_at(m.edges, i)}
+
+  def rename(%__MODULE__{} = m, id, name), do: put_in(m.nodes[id].name, name)
+  def set_type_ref(%__MODULE__{} = m, id, ref), do: put_in(m.nodes[id].type_ref, ref)
+
+  @doc "DMN requirement rules: input/decision -> decision (information), bkm -> decision/bkm (knowledge)."
+  def connect(%__MODULE__{} = m, from, to) do
+    a = m.nodes[from]
+    b = m.nodes[to]
+
+    cond do
+      is_nil(a) or is_nil(b) -> {:error, "nothing to connect"}
+      from == to -> {:error, "a node cannot require itself"}
+      Enum.any?(m.edges, fn {x, y, _} -> x == from and y == to end) -> {:error, "already connected"}
+      not valid_pair?(a.type, b.type) -> {:error, "#{a.type} cannot be required by #{b.type}"}
+      requires?(m, from, to) -> {:error, "that would create a cycle"}
+      true -> {:ok, %{m | edges: m.edges ++ [{from, to, if(a.type == :bkm, do: :knowledge, else: :info)}]}}
+    end
+  end
+
+  defp valid_pair?(:input, :decision), do: true
+  defp valid_pair?(:decision, :decision), do: true
+  defp valid_pair?(:bkm, t) when t in [:decision, :bkm], do: true
+  defp valid_pair?(_, _), do: false
+
+  # does `a` (transitively) require `b`?
+  defp requires?(m, a, b, seen \\ MapSet.new()) do
+    reqs = for {x, ^a, _} <- m.edges, do: x
+
+    Enum.any?(reqs, fn r ->
+      r == b or (not MapSet.member?(seen, r) and requires?(m, r, b, MapSet.put(seen, a)))
+    end)
   end
 end

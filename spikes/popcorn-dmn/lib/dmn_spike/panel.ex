@@ -7,6 +7,7 @@ defmodule DmnSpike.Panel do
 
   def render(%Model{} = m, id, results) do
     node = m.nodes[id]
+    head = head(m, node, results[id])
     cells = Model.cells(node) |> Enum.with_index()
 
     rows =
@@ -23,11 +24,31 @@ defmodule DmnSpike.Panel do
       end
 
     IO.iodata_to_binary([
+      head,
       ~s|<table class="boxed"><thead><tr><th colspan="3">#{Fmt.esc(node.name)} <small>#{kind(node)}</small></th></tr></thead><tbody>|,
       rows,
       "</tbody></table>"
     ])
   end
+
+  def head(m, node, result) do
+    opts =
+      for t <- [""] ++ DmnSpike.Types.builtins() ++ Enum.map(m.types, & &1.name) do
+        sel = if t == (node.type_ref || ""), do: " selected", else: ""
+        ~s|<option value="#{Fmt.esc(t)}"#{sel}>#{if t == "", do: "&lt;Undefined&gt;", else: Fmt.esc(t)}</option>|
+      end
+
+    [
+      ~s|<div class="nodehead"><input class="nname" data-op="nname" data-id="#{node.id}" value="#{Fmt.esc(node.name)}" spellcheck="false"/>|,
+      ~s|<label>type <select data-op="ntype" data-id="#{node.id}">#{opts}</select></label>|,
+      ~s|<span class="errs" id="nerr-#{node.id}">#{errors_html(result)}</span></div>|
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  def errors_html(nil), do: ""
+  def errors_html(%{errors: []}), do: ""
+  def errors_html(%{errors: errors}), do: "⚠ " <> Fmt.esc(Enum.join(errors, "; "))
 
   def hl(text, result), do: Highlight.html(text, err_span(result))
 
