@@ -36,7 +36,9 @@ defmodule DmnSpikeTest do
 
   test "values format readably" do
     assert DmnSpike.Fmt.value(%{"B" => Decimal.new("2.50"), "A" => "x"}) == ~s|{A: "x", B: 2.5}|
-    assert String.length(DmnSpike.Fmt.short(%{"Income" => Decimal.new(9000), "Debt" => Decimal.new(800), "Tax" => 1})) <= 22
+
+    assert String.length(DmnSpike.Fmt.short(%{"Income" => Decimal.new(9000), "Debt" => Decimal.new(800), "Tax" => 1})) <=
+             22
   end
 
   test "editing an input changes dependents" do
@@ -51,7 +53,11 @@ defmodule DmnSpikeTest do
     assert html =~ ~s|<span class="fn">sum</span>|
     assert html =~ ~s|<span class="n">2.5</span>|
     assert html =~ ~s|<span class="c"> // hi</span>|
-    strip = fn h -> h |> String.replace(~r/<[^>]+>/, "") |> String.replace("&gt;", ">") |> String.replace("&quot;", "\"") end
+
+    strip = fn h ->
+      h |> String.replace(~r/<[^>]+>/, "") |> String.replace("&gt;", ">") |> String.replace("&quot;", "\"")
+    end
+
     assert strip.(html) == ~s|if x > 1 then "a" else sum(2.5) // hi|
   end
 
@@ -66,7 +72,10 @@ defmodule DmnSpikeTest do
     text = "if Applicant Da"
     {start, names} = Autocomplete.suggest(m, "back", 0, text, String.length(text))
     assert "Applicant Data" in names
-    {new, caret} = Autocomplete.accept(text, String.length(text), start, names, Enum.find_index(names, &(&1 == "Applicant Data")))
+
+    {new, caret} =
+      Autocomplete.accept(text, String.length(text), start, names, Enum.find_index(names, &(&1 == "Applicant Data")))
+
     assert new == "if Applicant Data" and caret == String.length(new)
   end
 
@@ -86,7 +95,10 @@ defmodule DmnSpikeTest do
       assert Types.validate(m, "maybe", "tVerdict") == [~s|violates constraint "Qualified", "Not qualified"|]
       assert Types.validate(m, d.(7), "tRequested") == ["expected a structure"]
       bad = %{"Amount" => d.(1), "Rate" => d.(25), "Term" => d.(100)}
-      assert ["Rate: violates constraint (0..20]", "Term: violates constraint 120, 180, 240, 360"] = Types.validate(m, bad, "tRequested")
+
+      assert ["Rate: violates constraint (0..20]", "Term: violates constraint 120, 180, 240, 360"] =
+               Types.validate(m, bad, "tRequested")
+
       assert Types.validate(m, "x", "number") == ["expected a number"]
       assert Types.validate(m, nil, "tRatio") == []
       assert Types.validate(m, nil, "number") == []
@@ -168,7 +180,15 @@ defmodule DmnSpikeTest do
   describe "decision tables" do
     defp table_model(policy, rules) do
       m = Model.sample()
-      expr = %{kind: :table, hit_policy: policy, inputs: [%{expr: "Front End Ratio"}], outputs: [%{name: ""}], rules: rules}
+
+      expr = %{
+        kind: :table,
+        hit_policy: policy,
+        inputs: [%{expr: "Front End Ratio"}],
+        outputs: [%{name: ""}],
+        rules: rules
+      }
+
       put_in(m.nodes["risk"].expr, expr)
     end
 
@@ -199,9 +219,17 @@ defmodule DmnSpikeTest do
     end
 
     test "entries are unary tests: ranges, lists, negation, wildcard" do
-      for {entry, expected} <- [{"[20..25]", true}, {"10, 25", false}, {"not(25)", true}, {"-", true}, {"", true}, {"> Back End Ratio - 20", true}, {"< Back End Ratio", true}] do
+      for {entry, expected} <- [
+            {"[20..25]", true},
+            {"10, 25", false},
+            {"not(25)", true},
+            {"-", true},
+            {"", true},
+            {"> Back End Ratio - 20", true},
+            {"< Back End Ratio", true}
+          ] do
         r = risk(table_model("FIRST", [rule(entry, ~s|"hit"|)]))
-        assert (r.value == "hit") == expected, "entry #{inspect(entry)}"
+        assert r.value == "hit" == expected, "entry #{inspect(entry)}"
       end
     end
 
@@ -218,7 +246,12 @@ defmodule DmnSpikeTest do
       m = Model.del_input(m, "risk", 0) |> Model.del_rule("risk", 3)
       t = m.nodes["risk"].expr
       assert length(t.inputs) == 2 and Enum.all?(t.rules, &(length(&1.entries) == 2)) and length(t.rules) == 3
-      assert Model.set_table_text(m, "risk", ["e", 0, 1], "> 5").nodes["risk"].expr.rules |> hd() |> Map.get(:entries) |> Enum.at(1) == "> 5"
+
+      assert Model.set_table_text(m, "risk", ["e", 0, 1], "> 5").nodes["risk"].expr.rules
+             |> hd()
+             |> Map.get(:entries)
+             |> Enum.at(1) == "> 5"
+
       assert Model.set_expr_kind(m, "risk", :context).nodes["risk"].expr == %{rows: [], result: ""}
     end
   end
@@ -255,14 +288,19 @@ defmodule DmnSpikeTest do
       assert Map.keys(m.nodes) |> Enum.sort() == ["_app", "_back", "_dti", "_fee", "_loan_d", "_risk"]
       assert %{x: 40, y: 320, w: 160, h: 80} = Map.take(m.nodes["_app"], [:x, :y, :w, :h])
       assert m.nodes["_app"].type_ref == "tApplicant" and m.nodes["_back"].type == :decision
-      assert {"_app", "_back", :info} in m.edges and {"_back", "_risk", :info} in m.edges and {"_dti", "_loan_d", :knowledge} in m.edges
+
+      assert {"_app", "_back", :info} in m.edges and {"_back", "_risk", :info} in m.edges and
+               {"_dti", "_loan_d", :knowledge} in m.edges
+
       assert length(m.edges) == 6
       assert r.kept["knowledgeSource"] == 1 and r.kept["textAnnotation"] == 1 and r.kept["association"] == 1
       assert r.kept["authorityRequirement"] == 1
       assert r.dropped == %{}
       assert r.converted == %{"Fee: invocation to a FEEL function call" => 1}
       assert m.nodes["_fee"].expr.result == "feeFunction()"
-      assert r.placed == 1 and m.nodes["_fee"].y > m.nodes["_app"].y, "the Fee decision has no DMNShape, so it is placed below the rest"
+
+      assert r.placed == 1 and m.nodes["_fee"].y > m.nodes["_app"].y,
+             "the Fee decision has no DMNShape, so it is placed below the rest"
     end
 
     test "imported types, tables and contexts evaluate" do
@@ -342,7 +380,12 @@ defmodule DmnSpikeTest do
 
   describe "multiple output columns" do
     test "several outputs give a context keyed by output name" do
-      m = Model.sample() |> Model.add_output("risk") |> Model.set_table_text("risk", ["n", 0], "category") |> Model.set_table_text("risk", ["n", 1], "why")
+      m =
+        Model.sample()
+        |> Model.add_output("risk")
+        |> Model.set_table_text("risk", ["n", 0], "category")
+        |> Model.set_table_text("risk", ["n", 1], "why")
+
       m = m |> Model.set_table_text("risk", ["o", 1, 1], ~s|"medium because < 28"|)
       r = Eval.run(m)["risk"]
       assert r.value == %{"category" => "Medium", "why" => "medium because < 28"}
@@ -369,7 +412,11 @@ defmodule DmnSpikeTest do
 
     defp with_inputs(m, id, income, fico) do
       m
-      |> Model.set_text(id.("Applicant Data"), 0, ~s|{Age: 35, Marital Status: "S", Employment Status: "Employed", Existing Customer: false, Monthly: {Income: #{income}, Repayments: 100, Expenses: 2000, Tax: 300, Insurance: 100}}|)
+      |> Model.set_text(
+        id.("Applicant Data"),
+        0,
+        ~s|{Age: 35, Marital Status: "S", Employment Status: "Employed", Existing Customer: false, Monthly: {Income: #{income}, Repayments: 100, Expenses: 2000, Tax: 300, Insurance: 100}}|
+      )
       |> Model.set_text(id.("Requested Product"), 0, ~s|{Type: "Standard Loan", Rate: 4.5, Term: 360, Amount: 300000}|)
       |> Model.set_text(id.("Credit Score"), 0, "{FICO: #{fico}}")
     end
@@ -378,7 +425,11 @@ defmodule DmnSpikeTest do
       assert {r.nodes, r.edges, r.types, r.placed} == {11, 11, 16, 0}
       assert m.nodes |> Map.values() |> Enum.frequencies_by(& &1.type) == %{input: 3, decision: 4, bkm: 4}
       assert r.dropped == %{} and r.kept == %{}, "nothing in the real sample is lost or merely kept"
-      assert r.converted == %{"Back End Ratio: invocation to a FEEL function call" => 1, "Front End Ratio: invocation to a FEEL function call" => 1}
+
+      assert r.converted == %{
+               "Back End Ratio: invocation to a FEEL function call" => 1,
+               "Front End Ratio: invocation to a FEEL function call" => 1
+             }
     end
 
     test "business knowledge models are functions with their parameters", %{m: m, id: id} do
@@ -395,7 +446,10 @@ defmodule DmnSpikeTest do
       end
 
       assert {"Good", %{"Qualification" => "Qualified", "Reason" => "The borrower" <> _}} = out.(10_000, 720)
-      assert {"Good", %{"Qualification" => "Not Qualified", "Reason" => "Debt to income ratio is too high."}} = out.(4_000, 720)
+
+      assert {"Good", %{"Qualification" => "Not Qualified", "Reason" => "Debt to income ratio is too high."}} =
+               out.(4_000, 720)
+
       assert {"Bad", %{"Qualification" => "Not Qualified", "Reason" => "Credit Score too low."}} = out.(10_000, 580)
     end
 
@@ -404,35 +458,54 @@ defmodule DmnSpikeTest do
       assert [{:ok, dti, _}, {:ok, "Sufficient", _}] = r[id.("Back End Ratio")].cells
       assert Decimal.equal?(dti, Decimal.new("0.21")), "(repayments 100 + expenses 2000) / income 10000"
       assert [{:ok, piti, _}, _] = r[id.("Front End Ratio")].cells
-      assert Decimal.compare(piti, Decimal.new("0.0403")) in [:eq, :gt] and Decimal.compare(piti, Decimal.new("0.0404")) == :lt
+
+      assert Decimal.compare(piti, Decimal.new("0.0403")) in [:eq, :gt] and
+               Decimal.compare(piti, Decimal.new("0.0404")) == :lt
     end
 
     test "export then import is lossless for everything it imported", %{m: m, r: r} do
       {:ok, m2, r2} = Dmn.from_xml(Dmn.to_xml(m, r.name))
       assert m2.nodes == m.nodes and Enum.sort(m2.edges) == Enum.sort(m.edges) and m2.types == m.types
       assert r2.dropped == %{} and r2.kept == %{}
-      assert r2.converted == r.converted, "the invocations are kept as they were, so they are converted again on re-import"
+
+      assert r2.converted == r.converted,
+             "the invocations are kept as they were, so they are converted again on re-import"
     end
   end
 
   describe "review fixes" do
     alias DmnSpike.Dmn
 
-    defp dmn(body), do: ~s|<definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="x">#{body}</definitions>|
+    defp dmn(body),
+      do: ~s|<definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="x">#{body}</definitions>|
 
     test "element ids that are not plain XML names are refused at import" do
       for bad <- [~s|a&quot; onmouseover=&quot;alert(1)&quot; x=&quot;|, "a b", "a&lt;b", "a&#39;b", "a/b"] do
-        assert {:error, "invalid element id" <> _} = Dmn.from_xml(dmn(~s|<decision id="#{bad}" name="N"><variable name="N"/></decision>|)), bad
+        assert {:error, "invalid element id" <> _} =
+                 Dmn.from_xml(dmn(~s|<decision id="#{bad}" name="N"><variable name="N"/></decision>|)),
+               bad
       end
 
       for good <- ["n1", "_1CF5CEFA-AF97-46F9-9CD5-9A8AEBB20B4E", "dec.1", "é"] do
-        assert {:ok, _, _} = Dmn.from_xml(dmn(~s|<decision id="#{good}" name="N"><variable name="N"/></decision>|)), good
+        assert {:ok, _, _} = Dmn.from_xml(dmn(~s|<decision id="#{good}" name="N"><variable name="N"/></decision>|)),
+               good
       end
     end
 
     test "added nodes never reuse the id of an imported node" do
-      {:ok, m, _} = Dmn.from_xml(dmn(~s|<inputData id="n2" name="Imported"><variable name="Imported"/></inputData><inputData id="n3" name="Also"><variable name="Also"/></inputData>|))
-      {m, ids} = Enum.reduce(1..4, {m, []}, fn _, {m, ids} -> {m, id} = Model.add_node(m, "decision", 0, 0); {m, [id | ids]} end)
+      {:ok, m, _} =
+        Dmn.from_xml(
+          dmn(
+            ~s|<inputData id="n2" name="Imported"><variable name="Imported"/></inputData><inputData id="n3" name="Also"><variable name="Also"/></inputData>|
+          )
+        )
+
+      {m, ids} =
+        Enum.reduce(1..4, {m, []}, fn _, {m, ids} ->
+          {m, id} = Model.add_node(m, "decision", 0, 0)
+          {m, [id | ids]}
+        end)
+
       assert length(Enum.uniq(ids)) == 4
       assert map_size(m.nodes) == 6
       assert m.nodes["n2"].name == "Imported" and m.nodes["n3"].name == "Also"
@@ -460,7 +533,9 @@ defmodule DmnSpikeTest do
       assert "Front End Ratio" in names
       assert binary_part(text, start, byte_size("Fro")) == "Fro"
 
-      {new, new_caret} = Autocomplete.accept(text, caret, start, names, Enum.find_index(names, &(&1 == "Front End Ratio")))
+      {new, new_caret} =
+        Autocomplete.accept(text, caret, start, names, Enum.find_index(names, &(&1 == "Front End Ratio")))
+
       assert new == ~s|"😀" = Front End Ratio + 1|
       assert new_caret == Autocomplete.utf16_length(~s|"😀" = Front End Ratio|)
       assert String.slice(new, 0..-5//1) |> String.ends_with?("Front End Ratio")
@@ -472,12 +547,21 @@ defmodule DmnSpikeTest do
 
     # canonical form: no whitespace-only text, trimmed text, sorted attributes
     defp canon({tag, attrs, kids}) do
-      kids = for k <- kids, not (is_binary(k) and String.trim(k) == ""), do: if(is_binary(k), do: String.trim(k), else: canon(k))
+      kids =
+        for k <- kids,
+            not (is_binary(k) and String.trim(k) == ""),
+            do: if(is_binary(k), do: String.trim(k), else: canon(k))
+
       {tag, Enum.sort(attrs), kids}
     end
 
     defp parse!(xml), do: xml |> Saxy.SimpleForm.parse_string() |> elem(1) |> canon()
-    defp elements(xml), do: Regex.scan(~r/<[A-Za-z][^>\s\/]*/, xml) |> Enum.frequencies_by(fn [t] -> t |> String.trim_leading("<") |> String.split(":") |> List.last() end)
+
+    defp elements(xml),
+      do:
+        Regex.scan(~r/<[A-Za-z][^>\s\/]*/, xml)
+        |> Enum.frequencies_by(fn [t] -> t |> String.trim_leading("<") |> String.split(":") |> List.last() end)
+
     defp import!(file), do: Dmn.from_xml(File.read!(file)) |> then(fn {:ok, m, _} -> m end)
     defp find_all(xml, local), do: Regex.scan(~r/<(?:\w+:)?#{local}\b[^>]*>/, xml) |> Enum.map(&hd/1)
 
@@ -567,7 +651,11 @@ defmodule DmnSpikeTest do
     end
 
     test "an expression the editor cannot edit is kept, shown read-only, and survives edits elsewhere" do
-      xml = dmn(~s|<decision id="rel" name="Relation"><variable name="Relation"/><relation id="r1"><column name="a"/><row><literalExpression><text>1</text></literalExpression></row></relation></decision><decision id="d2" name="Other"><variable name="Other"/><literalExpression><text>1</text></literalExpression></decision>|)
+      xml =
+        dmn(
+          ~s|<decision id="rel" name="Relation"><variable name="Relation"/><relation id="r1"><column name="a"/><row><literalExpression><text>1</text></literalExpression></row></relation></decision><decision id="d2" name="Other"><variable name="Other"/><literalExpression><text>1</text></literalExpression></decision>|
+        )
+
       {:ok, m, r} = Dmn.from_xml(xml)
       assert m.nodes["rel"].expr == %{kind: :raw, tag: "relation"}
       assert r.kept == %{"Relation: relation expression, read-only" => 1}
@@ -581,7 +669,11 @@ defmodule DmnSpikeTest do
     end
 
     test "unknown attributes and elements on an edited element are kept" do
-      xml = dmn(~s|<decision id="d" name="Old" kie:custom="yes" xmlns:kie="http://www.drools.org/kie/dmn/1.2"><description>why</description><variable id="v" name="Old" typeRef="number"/><literalExpression id="le"><text>1</text></literalExpression></decision>|)
+      xml =
+        dmn(
+          ~s|<decision id="d" name="Old" kie:custom="yes" xmlns:kie="http://www.drools.org/kie/dmn/1.2"><description>why</description><variable id="v" name="Old" typeRef="number"/><literalExpression id="le"><text>1</text></literalExpression></decision>|
+        )
+
       {:ok, m, _} = Dmn.from_xml(xml)
       out = m |> Model.rename("d", "New") |> Dmn.to_xml()
       assert out =~ ~s|kie:custom="yes"|

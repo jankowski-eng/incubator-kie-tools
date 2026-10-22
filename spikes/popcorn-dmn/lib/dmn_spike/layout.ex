@@ -21,7 +21,10 @@ defmodule DmnSpike.Layout do
     initial =
       Map.new(by_layer, fn {l, ids} -> {l, Enum.sort_by(ids, &{m.nodes[&1].x, &1})} end)
 
-    order = Enum.reduce(1..4, initial, fn _, acc -> sweep(m, sweep(m, acc, 1..depth//1, :above), (depth - 1)..0//-1, :below) end)
+    order =
+      Enum.reduce(1..4, initial, fn _, acc ->
+        sweep(m, sweep(m, acc, 1..depth//1, :above), (depth - 1)..0//-1, :below)
+      end)
 
     width = fn ids -> Enum.sum(for id <- ids, do: m.nodes[id].w) + @gap_x * (length(ids) - 1) end
     widest = order |> Map.values() |> Enum.map(width) |> Enum.max()
@@ -51,8 +54,12 @@ defmodule DmnSpike.Layout do
 
   defp layer_of(m, id, acc, stack) do
     cond do
-      Map.has_key?(acc, id) -> {acc[id], acc}
-      id in stack -> {0, acc}
+      Map.has_key?(acc, id) ->
+        {acc[id], acc}
+
+      id in stack ->
+        {0, acc}
+
       true ->
         tos = for {^id, to, _} <- m.edges, do: to
 
@@ -76,7 +83,13 @@ defmodule DmnSpike.Layout do
         acc[l]
         |> Enum.with_index()
         |> Enum.sort_by(fn {id, i} ->
-          neigh = for {a, b, _} <- m.edges, n <- [if(dir == :above, do: (if a == id, do: b), else: (if b == id, do: a))], n != nil, Map.has_key?(ref_pos, n), do: ref_pos[n]
+          neigh =
+            for {a, b, _} <- m.edges,
+                n <- [if(dir == :above, do: if(a == id, do: b), else: if(b == id, do: a))],
+                n != nil,
+                Map.has_key?(ref_pos, n),
+                do: ref_pos[n]
+
           {if(neigh == [], do: i * 1.0, else: Enum.sum(neigh) / length(neigh)), i}
         end)
         |> Enum.map(&elem(&1, 0))

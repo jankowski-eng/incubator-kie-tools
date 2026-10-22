@@ -7,7 +7,18 @@ defmodule DmnSpike.Types do
 
   alias DmnSpike.Model
 
-  @builtins ["Any", "boolean", "context", "date", "date and time", "days and time duration", "number", "string", "time", "years and months duration"]
+  @builtins [
+    "Any",
+    "boolean",
+    "context",
+    "date",
+    "date and time",
+    "days and time duration",
+    "number",
+    "string",
+    "time",
+    "years and months duration"
+  ]
   @kinds [:enumeration, :range, :expression]
 
   def builtins, do: @builtins
@@ -36,9 +47,16 @@ defmodule DmnSpike.Types do
   end
 
   defp scalar(name, ref, constraint),
-    do: %{name: name, ref: ref, collection: false, components: [], constraint: constraint && %{kind: elem(constraint, 0), text: elem(constraint, 1)}}
+    do: %{
+      name: name,
+      ref: ref,
+      collection: false,
+      components: [],
+      constraint: constraint && %{kind: elem(constraint, 0), text: elem(constraint, 1)}
+    }
 
-  defp struct_type(name, components), do: %{name: name, ref: nil, collection: false, constraint: nil, components: components}
+  defp struct_type(name, components),
+    do: %{name: name, ref: nil, collection: false, constraint: nil, components: components}
 
   # --- lookup -----------------------------------------------------------------
 

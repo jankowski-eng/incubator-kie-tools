@@ -175,8 +175,19 @@ defmodule DmnSpike.Editor do
   @impl true
   def init(_) do
     state = %{
-      model: Model.sample(), past: [], future: [], selected: "front", sel_edge: nil,
-      drag: nil, group: nil, connect: nil, tab: "editor", report: nil, name: "Popcorn spike", upload: nil, view: nil
+      model: Model.sample(),
+      past: [],
+      future: [],
+      selected: "front",
+      sel_edge: nil,
+      drag: nil,
+      group: nil,
+      connect: nil,
+      tab: "editor",
+      report: nil,
+      name: "Popcorn spike",
+      upload: nil,
+      view: nil
     }
 
     {:ok, state, {:continue, :setup}}
@@ -203,6 +214,7 @@ defmodule DmnSpike.Editor do
       say(state, "internal error: " <> inspect({kind, reason}, limit: 4, printable_limit: 300))
       {:noreply, state}
   end
+
   def handle_info(_other, state), do: {:noreply, state}
 
   # --- diagram events -------------------------------------------------------------
@@ -274,11 +286,19 @@ defmodule DmnSpike.Editor do
   end
 
   defp event(%{"t" => "delete"}, %{sel_edge: i} = state) when i != nil do
-    state |> push_history(nil) |> Map.update!(:model, &Model.delete_edge(&1, i)) |> Map.put(:sel_edge, nil) |> render_all(true)
+    state
+    |> push_history(nil)
+    |> Map.update!(:model, &Model.delete_edge(&1, i))
+    |> Map.put(:sel_edge, nil)
+    |> render_all(true)
   end
 
   defp event(%{"t" => "delete"}, %{selected: id} = state) when id != nil do
-    state |> push_history(nil) |> Map.update!(:model, &Model.delete_node(&1, id)) |> Map.put(:selected, nil) |> render_all(true)
+    state
+    |> push_history(nil)
+    |> Map.update!(:model, &Model.delete_node(&1, id))
+    |> Map.put(:selected, nil)
+    |> render_all(true)
   end
 
   defp event(%{"t" => "rename"}, state) do
@@ -297,7 +317,12 @@ defmodule DmnSpike.Editor do
   end
 
   defp event(%{"t" => "import_chunk", "name" => file, "i" => i, "n" => n, "text" => part}, state) do
-    {^file, ^n, parts} = (case state.upload do {^file, ^n, _} = u -> u; _ -> {file, n, %{}} end)
+    {^file, ^n, parts} =
+      case state.upload do
+        {^file, ^n, _} = u -> u
+        _ -> {file, n, %{}}
+      end
+
     parts = Map.put(parts, i, part)
 
     if map_size(parts) == n do
@@ -314,7 +339,11 @@ defmodule DmnSpike.Editor do
         state = push_history(state, nil)
         name = report.name || Path.rootname(file)
         selected = model.nodes |> Map.values() |> Enum.find(&(&1.type == :decision)) |> then(&(&1 && &1.id))
-        render_all(%{state | model: model, selected: selected, sel_edge: nil, report: {:ok, file, report}, name: name}, true)
+
+        render_all(
+          %{state | model: model, selected: selected, sel_edge: nil, report: {:ok, file, report}, name: name},
+          true
+        )
 
       {:error, msg} ->
         render_all(%{state | report: {:error, file, msg}}, true)
@@ -427,7 +456,9 @@ defmodule DmnSpike.Editor do
 
   defp event(%{"t" => "click", "what" => "dt-add-rule:" <> id}, state), do: edit_table(state, &Model.add_rule(&1, id))
   defp event(%{"t" => "click", "what" => "dt-add-input:" <> id}, state), do: edit_table(state, &Model.add_input(&1, id))
-  defp event(%{"t" => "click", "what" => "dt-add-output:" <> id}, state), do: edit_table(state, &Model.add_output(&1, id))
+
+  defp event(%{"t" => "click", "what" => "dt-add-output:" <> id}, state),
+    do: edit_table(state, &Model.add_output(&1, id))
 
   defp event(%{"t" => "click", "what" => "dt-del-output:" <> rest}, state) do
     [id, k] = String.split(rest, ":")
@@ -554,7 +585,14 @@ defmodule DmnSpike.Editor do
   defp deselect_ops(state, results) do
     node =
       if state.selected && state.model.nodes[state.selected],
-        do: [["attr", ~s|[data-id="#{state.selected}"]|, "class", Svg.node_class(false, results[state.selected].errors != [])]],
+        do: [
+          [
+            "attr",
+            ~s|[data-id="#{state.selected}"]|,
+            "class",
+            Svg.node_class(false, results[state.selected].errors != [])
+          ]
+        ],
         else: []
 
     edge = if state.sel_edge, do: [["attr", "#edge-#{state.sel_edge}", "class", Svg.edge_class(false)]], else: []
@@ -603,7 +641,9 @@ defmodule DmnSpike.Editor do
         do: Panel.table_ops(state.model, state.selected, results[state.selected]),
         else: []
 
-    node_ops ++ shown ++ table ++ [["html", "#status", "evaluated #{n} cells in #{Float.round(us / 1000, 1)} ms"]] ++ history_ops(state)
+    node_ops ++
+      shown ++
+      table ++ [["html", "#status", "evaluated #{n} cells in #{Float.round(us / 1000, 1)} ms"]] ++ history_ops(state)
   end
 
   defp current_view(%{view: nil, model: m}), do: View.parse(Svg.viewbox(m))
@@ -628,8 +668,13 @@ defmodule DmnSpike.Editor do
     do: ~s|<div class="rep"><span class="bad"><b>#{Fmt.esc(file)}</b>: #{Fmt.esc(msg)}</span>#{@dismiss}</div>|
 
   defp report_html({:ok, file, r}) do
-    list = fn map -> for({what, n} <- Enum.sort(map), do: "<li>#{if n > 1, do: "#{n} × "}#{Fmt.esc(what)}</li>") |> Enum.join() end
-    section = fn title, map -> if map == %{}, do: "", else: ~s|<p>#{title}</p><ul class="dropped">#{list.(map)}</ul>| end
+    list = fn map ->
+      for({what, n} <- Enum.sort(map), do: "<li>#{if n > 1, do: "#{n} × "}#{Fmt.esc(what)}</li>") |> Enum.join()
+    end
+
+    section = fn title, map ->
+      if map == %{}, do: "", else: ~s|<p>#{title}</p><ul class="dropped">#{list.(map)}</ul>|
+    end
 
     placed = if r.placed > 0, do: ", #{r.placed} placed automatically (no diagram shape)", else: ""
     lost? = r.dropped != %{}
@@ -648,7 +693,10 @@ defmodule DmnSpike.Editor do
 
     ~s|<div class="rep"><span><b>#{Fmt.esc(file)}</b>: imported #{r.nodes} nodes, #{r.edges} requirements, #{r.types} data types#{placed}.</span>| <>
       verdict <>
-      if(details == "", do: "", else: ~s|<details#{if lost?, do: " open"}><summary>Details</summary>#{details}</details>|) <>
+      if(details == "",
+        do: "",
+        else: ~s|<details#{if lost?, do: " open"}><summary>Details</summary>#{details}</details>|
+      ) <>
       @dismiss <> "</div>"
   end
 

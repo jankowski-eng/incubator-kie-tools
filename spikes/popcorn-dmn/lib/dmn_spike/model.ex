@@ -39,10 +39,8 @@ defmodule DmnSpike.Model do
         {"risk", :decision, "Risk Category", 650, 280, [], ""},
         {"dti", :bkm, "Lender Acceptable DTI", 10, 30, [], "36"},
         {"piti", :bkm, "Lender Acceptable PITI", 650, 30, [], "28"},
-        {"app", :input, "Applicant Data", 170, 280, [],
-         "{Income: 9000, Tax: 400, Insurance: 120, Debt: 800}"},
-        {"prod", :input, "Requested Product", 490, 280, [],
-         "{Amount: 300000, Rate: 4.5, Term: 360}"}
+        {"app", :input, "Applicant Data", 170, 280, [], "{Income: 9000, Tax: 400, Insurance: 120, Debt: 800}"},
+        {"prod", :input, "Requested Product", 490, 280, [], "{Amount: 300000, Rate: 4.5, Term: 360}"}
       ]
       |> Map.new(fn {id, type, name, x, y, rows, result} ->
         expr = %{rows: Enum.map(rows, fn {n, t} -> %{name: n, text: t} end), result: result}
@@ -91,9 +89,17 @@ defmodule DmnSpike.Model do
   def kind(%{expr: expr}), do: Map.get(expr, :kind, :context)
 
   def new_table,
-    do: %{kind: :table, hit_policy: "UNIQUE", inputs: [%{expr: ""}], outputs: [%{name: ""}], note_title: nil, rules: [%{entries: ["-"], outs: [""], note: ""}]}
+    do: %{
+      kind: :table,
+      hit_policy: "UNIQUE",
+      inputs: [%{expr: ""}],
+      outputs: [%{name: ""}],
+      note_title: nil,
+      rules: [%{entries: ["-"], outs: [""], note: ""}]
+    }
 
   def set_expr_kind(%__MODULE__{} = m, id, :table), do: put_in(m.nodes[id].expr, new_table())
+
   def set_expr_kind(%__MODULE__{} = m, id, :context),
     do: put_in(m.nodes[id].expr, with_params(m.nodes[id], %{rows: [], result: ""}, params(m.nodes[id])))
 
@@ -110,6 +116,7 @@ defmodule DmnSpike.Model do
 
   def cell_count(%{expr: %{kind: :table, inputs: ins, outputs: outs, rules: rules}}),
     do: length(ins) + length(rules) * (length(ins) + length(outs))
+
   def cell_count(%{expr: %{kind: :raw}}), do: 0
   def cell_count(node), do: length(cells(node))
 
@@ -132,10 +139,21 @@ defmodule DmnSpike.Model do
   def set_table_text(%__MODULE__{} = m, id, path, text) do
     update_in(m.nodes[id].expr, fn t ->
       case path do
-        ["h", i] -> %{t | inputs: List.update_at(t.inputs, i, &%{&1 | expr: text})}
-        ["e", r, i] -> %{t | rules: List.update_at(t.rules, r, fn rule -> %{rule | entries: List.replace_at(rule.entries, i, text)} end)}
-        ["o", r, k] -> %{t | rules: List.update_at(t.rules, r, fn rule -> %{rule | outs: List.replace_at(rule.outs, k, text)} end)}
-        ["n", k] -> %{t | outputs: List.update_at(t.outputs, k, &%{&1 | name: text})}
+        ["h", i] ->
+          %{t | inputs: List.update_at(t.inputs, i, &%{&1 | expr: text})}
+
+        ["e", r, i] ->
+          %{
+            t
+            | rules:
+                List.update_at(t.rules, r, fn rule -> %{rule | entries: List.replace_at(rule.entries, i, text)} end)
+          }
+
+        ["o", r, k] ->
+          %{t | rules: List.update_at(t.rules, r, fn rule -> %{rule | outs: List.replace_at(rule.outs, k, text)} end)}
+
+        ["n", k] ->
+          %{t | outputs: List.update_at(t.outputs, k, &%{&1 | name: text})}
       end
     end)
   end
@@ -147,15 +165,25 @@ defmodule DmnSpike.Model do
 
   def add_rule(%__MODULE__{} = m, id) do
     update_in(m.nodes[id].expr, fn t ->
-      %{t | rules: t.rules ++ [%{entries: Enum.map(t.inputs, fn _ -> "-" end), outs: Enum.map(t.outputs, fn _ -> "" end), note: ""}]}
+      %{
+        t
+        | rules:
+            t.rules ++
+              [%{entries: Enum.map(t.inputs, fn _ -> "-" end), outs: Enum.map(t.outputs, fn _ -> "" end), note: ""}]
+      }
     end)
   end
 
-  def del_rule(%__MODULE__{} = m, id, r), do: update_in(m.nodes[id].expr, fn t -> %{t | rules: List.delete_at(t.rules, r)} end)
+  def del_rule(%__MODULE__{} = m, id, r),
+    do: update_in(m.nodes[id].expr, fn t -> %{t | rules: List.delete_at(t.rules, r)} end)
 
   def add_output(%__MODULE__{} = m, id) do
     update_in(m.nodes[id].expr, fn t ->
-      %{t | outputs: t.outputs ++ [%{name: "output #{length(t.outputs) + 1}"}], rules: Enum.map(t.rules, &%{&1 | outs: &1.outs ++ [""]})}
+      %{
+        t
+        | outputs: t.outputs ++ [%{name: "output #{length(t.outputs) + 1}"}],
+          rules: Enum.map(t.rules, &%{&1 | outs: &1.outs ++ [""]})
+      }
     end)
   end
 
@@ -163,7 +191,11 @@ defmodule DmnSpike.Model do
     update_in(m.nodes[id].expr, fn t ->
       if length(t.outputs) <= 1,
         do: t,
-        else: %{t | outputs: List.delete_at(t.outputs, k), rules: Enum.map(t.rules, &%{&1 | outs: List.delete_at(&1.outs, k)})}
+        else: %{
+          t
+          | outputs: List.delete_at(t.outputs, k),
+            rules: Enum.map(t.rules, &%{&1 | outs: List.delete_at(&1.outs, k)})
+        }
     end)
   end
 
@@ -175,7 +207,11 @@ defmodule DmnSpike.Model do
 
   def del_input(%__MODULE__{} = m, id, i) do
     update_in(m.nodes[id].expr, fn t ->
-      %{t | inputs: List.delete_at(t.inputs, i), rules: Enum.map(t.rules, &%{&1 | entries: List.delete_at(&1.entries, i)})}
+      %{
+        t
+        | inputs: List.delete_at(t.inputs, i),
+          rules: Enum.map(t.rules, &%{&1 | entries: List.delete_at(&1.entries, i)})
+      }
     end)
   end
 
@@ -192,7 +228,11 @@ defmodule DmnSpike.Model do
 
   # --- structure edits ------------------------------------------------------
 
-  @kinds %{"decision" => {:decision, "decision"}, "input" => {:input, "input data"}, "bkm" => {:bkm, "business knowledge"}}
+  @kinds %{
+    "decision" => {:decision, "decision"},
+    "input" => {:input, "input data"},
+    "bkm" => {:bkm, "business knowledge"}
+  }
 
   @doc "Adds a node of `kind` centred on `{x, y}`; returns `{model, id}`."
   def add_node(%__MODULE__{} = m, kind, x, y) do
@@ -205,8 +245,15 @@ defmodule DmnSpike.Model do
     name = Enum.find([base | Enum.map(2..99, &"#{base} #{&1}")], &(not MapSet.member?(names, &1)))
 
     node = %{
-      id: id, type: type, name: name, x: round(x - 75), y: round(y - 30), w: 150, h: 60,
-      expr: %{rows: [], result: ""}, type_ref: nil
+      id: id,
+      type: type,
+      name: name,
+      x: round(x - 75),
+      y: round(y - 30),
+      w: 150,
+      h: 60,
+      expr: %{rows: [], result: ""},
+      type_ref: nil
     }
 
     {%{m | nodes: Map.put(m.nodes, id, node), next: n + 1}, id}

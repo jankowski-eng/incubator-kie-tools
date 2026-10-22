@@ -1,7 +1,13 @@
 defmodule DmnSpike.Fmt do
   @moduledoc "Escaping and value formatting."
 
-  def esc(s), do: s |> String.replace("&", "&amp;") |> String.replace("<", "&lt;") |> String.replace(">", "&gt;") |> String.replace("\"", "&quot;")
+  def esc(s),
+    do:
+      s
+      |> String.replace("&", "&amp;")
+      |> String.replace("<", "&lt;")
+      |> String.replace(">", "&gt;")
+      |> String.replace("\"", "&quot;")
 
   def value(nil), do: "null"
   def value(%Decimal{} = d), do: d |> Decimal.round(4) |> Decimal.normalize() |> Decimal.to_string(:normal)

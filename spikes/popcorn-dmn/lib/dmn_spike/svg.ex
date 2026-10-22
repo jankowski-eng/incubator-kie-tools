@@ -7,7 +7,9 @@ defmodule DmnSpike.Svg do
     edges =
       m.edges
       |> Enum.with_index()
-      |> Enum.map(fn {e, i} -> [~s|<g id="edge-#{i}" class="#{edge_class(i == sel_edge)}" data-edge="#{i}">|, edge(m, e, i), "</g>"] end)
+      |> Enum.map(fn {e, i} ->
+        [~s|<g id="edge-#{i}" class="#{edge_class(i == sel_edge)}" data-edge="#{i}">|, edge(m, e, i), "</g>"]
+      end)
 
     nodes =
       m.nodes
@@ -40,6 +42,7 @@ defmodule DmnSpike.Svg do
 
   def preview(%Model{nodes: nodes}, from, {px, py}) do
     {x1, y1} = border(nodes[from], {px, py})
+
     ~s|<line x1="#{x1}" y1="#{y1}" x2="#{Float.round(px * 1.0, 1)}" y2="#{Float.round(py * 1.0, 1)}" stroke="currentColor" stroke-dasharray="3 3" marker-end="url(#arrow-fill)"/>|
   end
 
@@ -100,12 +103,15 @@ defmodule DmnSpike.Svg do
   end
 
   defp shape(%{type: :decision} = n), do: ~s|<rect class="shape decision" width="#{n.w}" height="#{n.h}" rx="5"/>|
-  defp shape(%{type: :input} = n), do: ~s|<rect class="shape input" width="#{n.w}" height="#{n.h}" rx="#{div(n.h, 2)}"/>|
+
+  defp shape(%{type: :input} = n),
+    do: ~s|<rect class="shape input" width="#{n.w}" height="#{n.h}" rx="#{div(n.h, 2)}"/>|
 
   # business knowledge: a rectangle with both top corners cut
   defp shape(%{type: :bkm} = n) do
     c = 14
     pts = [{c, 0}, {n.w - c, 0}, {n.w, c}, {n.w, n.h}, {0, n.h}, {0, c}]
+
     ~s|<polygon class="shape bkm" points="#{Enum.map_join(pts, " ", fn {x, y} -> "#{x},#{y}" end)}" stroke-linejoin="round"/>|
   end
 end

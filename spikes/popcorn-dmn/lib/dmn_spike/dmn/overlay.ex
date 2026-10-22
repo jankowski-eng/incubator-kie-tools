@@ -22,7 +22,8 @@ defmodule DmnSpike.Dmn.Overlay do
 
   # the order of children DMN's schema prescribes (unknown children go before the expression)
   @rank %{
-    decision: ~w(extensionElements description question allowedAnswers variable informationRequirement knowledgeRequirement authorityRequirement supportedObjective impactedPerformanceIndicator decisionMaker decisionOwner usingProcess usingTask),
+    decision:
+      ~w(extensionElements description question allowedAnswers variable informationRequirement knowledgeRequirement authorityRequirement supportedObjective impactedPerformanceIndicator decisionMaker decisionOwner usingProcess usingTask),
     input: ~w(extensionElements description variable),
     bkm: ~w(extensionElements description variable encapsulatedLogic knowledgeRequirement authorityRequirement),
     item: ~w(extensionElements description typeRef itemComponent allowedValues typeConstraint functionItem)
@@ -51,7 +52,11 @@ defmodule DmnSpike.Dmn.Overlay do
       end
 
     types =
-      for {tag, a, _} = c <- children, Dmn.local(tag) == "itemDefinition", name = Dmn.attr(a, "name"), t = Enum.find(m.types, &(&1.name == name)), into: %{} do
+      for {tag, a, _} = c <- children,
+          Dmn.local(tag) == "itemDefinition",
+          name = Dmn.attr(a, "name"),
+          t = Enum.find(m.types, &(&1.name == name)),
+          into: %{} do
         {name, %{raw: c, type: t}}
       end
 
@@ -80,10 +85,17 @@ defmodule DmnSpike.Dmn.Overlay do
     rest = String.trim_leading(rest)
 
     cond do
-      String.starts_with?(rest, "<!--") -> take_until(rest, "-->", acc, &prolog_items/2)
-      String.starts_with?(rest, "<?") -> take_until(rest, "?>", acc, &prolog_items/2)
-      String.starts_with?(rest, "<!DOCTYPE") -> take_until(rest, ">", acc, fn r, a -> prolog_items(r, tl_doctype(a)) end)
-      true -> acc
+      String.starts_with?(rest, "<!--") ->
+        take_until(rest, "-->", acc, &prolog_items/2)
+
+      String.starts_with?(rest, "<?") ->
+        take_until(rest, "?>", acc, &prolog_items/2)
+
+      String.starts_with?(rest, "<!DOCTYPE") ->
+        take_until(rest, ">", acc, fn r, a -> prolog_items(r, tl_doctype(a)) end)
+
+      true ->
+        acc
     end
   end
 
@@ -105,7 +117,10 @@ defmodule DmnSpike.Dmn.Overlay do
   end
 
   defp req_ids({_, _, kids}) do
-    for {t, a, rk} <- Enum.filter(kids, &is_tuple/1), Dmn.local(t) in ["informationRequirement", "knowledgeRequirement"], id = Dmn.attr(a, "id"), into: %{} do
+    for {t, a, rk} <- Enum.filter(kids, &is_tuple/1),
+        Dmn.local(t) in ["informationRequirement", "knowledgeRequirement"],
+        id = Dmn.attr(a, "id"),
+        into: %{} do
       {{req_from(rk), if(Dmn.local(t) == "informationRequirement", do: :info, else: :knowledge)}, id}
     end
   end
@@ -124,6 +139,7 @@ defmodule DmnSpike.Dmn.Overlay do
     items = children_out(m, doc, pre)
 
     ids_out = items |> Enum.reject(&(&1 == :dmndi)) |> collect_ids() |> MapSet.new()
+
     out =
       Enum.map(items, fn
         :dmndi -> dmndi_el(m, doc, pre, ids_out)
@@ -143,9 +159,17 @@ defmodule DmnSpike.Dmn.Overlay do
   # --- prefixes ---------------------------------------------------------------------
 
   defp prefixes(doc) do
-    model = case String.split(doc.root_tag, ":") do [p, _] -> p <> ":"; _ -> "" end
+    model =
+      case String.split(doc.root_tag, ":") do
+        [p, _] -> p <> ":"
+        _ -> ""
+      end
+
     uris = for {"xmlns:" <> p, uri} <- doc.root_attrs, into: %{}, do: {uri, p <> ":"}
-    find = fn pattern, default -> Enum.find_value(uris, default, fn {uri, p} -> if Regex.match?(pattern, uri), do: p end) end
+
+    find = fn pattern, default ->
+      Enum.find_value(uris, default, fn {uri, p} -> if Regex.match?(pattern, uri), do: p end)
+    end
 
     %{
       model: model,
@@ -159,7 +183,8 @@ defmodule DmnSpike.Dmn.Overlay do
 
   # generated trees use unprefixed DMN names and dmndi:/dc:/di:/kie:/spike: for the rest; give them the file's prefixes
   defp q({:el, tag, attrs, kids}, pre) do
-    {:el, qname(tag, pre, true), Enum.map(attrs, fn {k, v} -> {qname(k, pre, false), v} end), Enum.map(kids, fn k -> if is_binary(k), do: k, else: q(k, pre) end)}
+    {:el, qname(tag, pre, true), Enum.map(attrs, fn {k, v} -> {qname(k, pre, false), v} end),
+     Enum.map(kids, fn k -> if is_binary(k), do: k, else: q(k, pre) end)}
   end
 
   defp qname("dmndi:" <> r, pre, _), do: pre.dmndi <> r
@@ -184,7 +209,12 @@ defmodule DmnSpike.Dmn.Overlay do
   end
 
   defp prefixes_used({:el, tag, attrs, kids}) do
-    own = for name <- [tag | Enum.map(attrs, &elem(&1, 0))], [p, _] <- [String.split(name, ":", parts: 2)], p != "xmlns", do: p
+    own =
+      for name <- [tag | Enum.map(attrs, &elem(&1, 0))],
+          [p, _] <- [String.split(name, ":", parts: 2)],
+          p != "xmlns",
+          do: p
+
     own ++ Enum.flat_map(kids, fn k -> if is_binary(k), do: [], else: prefixes_used(k) end)
   end
 
@@ -228,8 +258,18 @@ defmodule DmnSpike.Dmn.Overlay do
   # --- children of the root --------------------------------------------------------------
 
   defp children_out(m, doc, pre) do
-    new_types = m.types |> Enum.reject(&Map.has_key?(doc.types, &1.name)) |> Enum.with_index() |> Enum.map(fn {t, i} -> q(Dmn.item_xml(t, "_t-new#{i}-#{:erlang.phash2(t.name)}"), pre) end)
-    new_nodes = m.nodes |> Map.values() |> Enum.reject(&Map.has_key?(doc.nodes, &1.id)) |> Enum.sort_by(& &1.id) |> Enum.map(&q(Dmn.node_xml(m, &1), pre))
+    new_types =
+      m.types
+      |> Enum.reject(&Map.has_key?(doc.types, &1.name))
+      |> Enum.with_index()
+      |> Enum.map(fn {t, i} -> q(Dmn.item_xml(t, "_t-new#{i}-#{:erlang.phash2(t.name)}"), pre) end)
+
+    new_nodes =
+      m.nodes
+      |> Map.values()
+      |> Enum.reject(&Map.has_key?(doc.nodes, &1.id))
+      |> Enum.sort_by(& &1.id)
+      |> Enum.map(&q(Dmn.node_xml(m, &1), pre))
 
     indexed = Enum.with_index(doc.children)
     idx = fn pred -> indexed |> Enum.filter(fn {mk, _} -> pred.(mk) end) |> Enum.map(&elem(&1, 1)) end
@@ -243,21 +283,30 @@ defmodule DmnSpike.Dmn.Overlay do
     body =
       Enum.flat_map(indexed, fn {marker, i} ->
         before =
-          (if types_at == {:before, i}, do: new_types, else: []) ++ (if nodes_at == {:before, i}, do: new_nodes, else: [])
+          if(types_at == {:before, i}, do: new_types, else: []) ++ if nodes_at == {:before, i}, do: new_nodes, else: []
 
         item =
           case marker do
-            {:node, id} -> if(n = m.nodes[id], do: [node_el(m, doc, n, pre)], else: [])
-            {:type, name} -> if(t = Enum.find(m.types, &(&1.name == name)), do: [type_el(doc.types[name], t, pre)], else: [])
-            :dmndi -> [:dmndi]
-            {:raw, c} -> [from_simple(c)]
+            {:node, id} ->
+              if(n = m.nodes[id], do: [node_el(m, doc, n, pre)], else: [])
+
+            {:type, name} ->
+              if(t = Enum.find(m.types, &(&1.name == name)), do: [type_el(doc.types[name], t, pre)], else: [])
+
+            :dmndi ->
+              [:dmndi]
+
+            {:raw, c} ->
+              [from_simple(c)]
           end
 
-        after_ = (if types_at == {:after, i}, do: new_types, else: []) ++ (if nodes_at == {:after, i}, do: new_nodes, else: [])
+        after_ =
+          if(types_at == {:after, i}, do: new_types, else: []) ++ if nodes_at == {:after, i}, do: new_nodes, else: []
+
         before ++ item ++ after_
       end)
 
-    body ++ (if types_at == :end, do: new_types, else: []) ++ (if nodes_at == :end, do: new_nodes, else: [])
+    body ++ if(types_at == :end, do: new_types, else: []) ++ if nodes_at == :end, do: new_nodes, else: []
   end
 
   # new elements go after the last element of their kind, else before `fallback`, else at the end
@@ -269,8 +318,11 @@ defmodule DmnSpike.Dmn.Overlay do
 
   defp node_el(m, doc, node, pre) do
     case doc.nodes[node.id] do
-      nil -> q(Dmn.node_xml(m, node), pre)
-      %{raw: raw, fp: fp} = entry -> if fingerprint(m, node) == fp, do: from_simple(raw), else: regen_node(m, node, entry, pre)
+      nil ->
+        q(Dmn.node_xml(m, node), pre)
+
+      %{raw: raw, fp: fp} = entry ->
+        if fingerprint(m, node) == fp, do: from_simple(raw), else: regen_node(m, node, entry, pre)
     end
   end
 
@@ -305,14 +357,27 @@ defmodule DmnSpike.Dmn.Overlay do
 
     expression =
       cond do
-        node.type == :input -> []
-        node.expr == efp -> for r <- raw, Dmn.local(elem(r, 0)) in @expr_tags or Dmn.local(elem(r, 0)) == "encapsulatedLogic", do: from_simple(r)
-        true -> fresh.("literalExpression") ++ fresh.("context") ++ fresh.("decisionTable") ++ fresh.("encapsulatedLogic")
+        node.type == :input ->
+          []
+
+        node.expr == efp ->
+          for r <- raw,
+              Dmn.local(elem(r, 0)) in @expr_tags or Dmn.local(elem(r, 0)) == "encapsulatedLogic",
+              do: from_simple(r)
+
+        true ->
+          fresh.("literalExpression") ++ fresh.("context") ++ fresh.("decisionTable") ++ fresh.("encapsulatedLogic")
       end
 
-    extension = if node.type == :input, do: input_extension(node, named.("extensionElements"), pre), else: Enum.map(named.("extensionElements"), &from_simple/1)
+    extension =
+      if node.type == :input,
+        do: input_extension(node, named.("extensionElements"), pre),
+        else: Enum.map(named.("extensionElements"), &from_simple/1)
 
-    handled = ["variable", "informationRequirement", "knowledgeRequirement", "extensionElements", "encapsulatedLogic"] ++ @expr_tags
+    handled =
+      ["variable", "informationRequirement", "knowledgeRequirement", "extensionElements", "encapsulatedLogic"] ++
+        @expr_tags
+
     others = for r <- raw, Dmn.local(elem(r, 0)) not in handled, do: from_simple(r)
     kind = %{input: :input, decision: :decision, bkm: :bkm}[node.type]
 
@@ -329,7 +394,11 @@ defmodule DmnSpike.Dmn.Overlay do
         if ours == [], do: [], else: [{:el, pre.model <> "extensionElements", [], ours}]
 
       [{t, a, k} | _] ->
-        kept = for c <- Enum.filter(k, &is_tuple/1), Dmn.local(elem(c, 0)) != "value" or not String.contains?(elem(c, 0), "spike"), do: from_simple(c)
+        kept =
+          for c <- Enum.filter(k, &is_tuple/1),
+              Dmn.local(elem(c, 0)) != "value" or not String.contains?(elem(c, 0), "spike"),
+              do: from_simple(c)
+
         content = kept ++ ours
         if content == [], do: [], else: [{:el, t, a, content}]
     end
@@ -349,11 +418,13 @@ defmodule DmnSpike.Dmn.Overlay do
     others = for r <- raw, Dmn.local(elem(r, 0)) not in handled, do: from_simple(r)
 
     attrs = put_attrs(attrs, [{"name", type.name}])
-    attrs = cond do
-      type.collection -> put_attrs(attrs, [{"isCollection", "true"}])
-      List.keymember?(attrs, "isCollection", 0) -> put_attrs(attrs, [{"isCollection", "false"}])
-      true -> attrs
-    end
+
+    attrs =
+      cond do
+        type.collection -> put_attrs(attrs, [{"isCollection", "true"}])
+        List.keymember?(attrs, "isCollection", 0) -> put_attrs(attrs, [{"isCollection", "false"}])
+        true -> attrs
+      end
 
     {:el, tag, attrs, sort_children(fresh_kids ++ others, :item)}
   end
@@ -393,7 +464,12 @@ defmodule DmnSpike.Dmn.Overlay do
             {[], others} -> {{pre.dmndi <> "DMNDiagram", [{"id", "_diagram"}], []}, others}
           end
 
-        moved? = fn id -> case {m.nodes[id], orig_shapes[id]} do {n, b} when n != nil and b != nil -> bounds(n) != b; _ -> true end end
+        moved? = fn id ->
+          case {m.nodes[id], orig_shapes[id]} do
+            {n, b} when n != nil and b != nil -> bounds(n) != b
+            _ -> true
+          end
+        end
 
         kept =
           for {t, a, k} = c <- Enum.filter(gkids, &is_tuple/1) do
@@ -402,9 +478,14 @@ defmodule DmnSpike.Dmn.Overlay do
             case Dmn.local(t) do
               "DMNShape" ->
                 cond do
-                  doc.nodes[ref] != nil and m.nodes[ref] == nil -> nil
-                  m.nodes[ref] != nil and doc.nodes[ref] != nil and moved?.(ref) -> from_simple({t, a, update_bounds(k, bounds(m.nodes[ref]))})
-                  true -> from_simple(c)
+                  doc.nodes[ref] != nil and m.nodes[ref] == nil ->
+                    nil
+
+                  m.nodes[ref] != nil and doc.nodes[ref] != nil and moved?.(ref) ->
+                    from_simple({t, a, update_bounds(k, bounds(m.nodes[ref]))})
+
+                  true ->
+                    from_simple(c)
                 end
 
               "DMNEdge" ->
@@ -413,8 +494,11 @@ defmodule DmnSpike.Dmn.Overlay do
                     {f, to} = expected[ref]
                     if moved?.(f) or moved?.(to), do: regen_waypoints({t, a, k}, m, f, to, pre), else: from_simple(c)
 
-                  MapSet.member?(ids_out, ref) -> from_simple(c)
-                  true -> nil
+                  MapSet.member?(ids_out, ref) ->
+                    from_simple(c)
+
+                  true ->
+                    nil
                 end
 
               _ ->
@@ -424,8 +508,12 @@ defmodule DmnSpike.Dmn.Overlay do
           end
           |> Enum.reject(&is_nil/1)
 
-        present_shapes = for {t, a, _} <- Enum.filter(gkids, &is_tuple/1), Dmn.local(t) == "DMNShape", do: Dmn.attr(a, "dmnElementRef")
-        present_edges = for {t, a, _} <- Enum.filter(gkids, &is_tuple/1), Dmn.local(t) == "DMNEdge", do: Dmn.attr(a, "dmnElementRef")
+        present_shapes =
+          for {t, a, _} <- Enum.filter(gkids, &is_tuple/1), Dmn.local(t) == "DMNShape", do: Dmn.attr(a, "dmnElementRef")
+
+        present_edges =
+          for {t, a, _} <- Enum.filter(gkids, &is_tuple/1), Dmn.local(t) == "DMNEdge", do: Dmn.attr(a, "dmnElementRef")
+
         new_shapes = for n <- sorted_nodes(m), n.id not in present_shapes, do: new_shape(n, pre)
         new_edges = for {rid, {f, t}} <- Enum.sort(expected), rid not in present_edges, do: new_edge(m, rid, f, t, pre)
 
@@ -434,7 +522,8 @@ defmodule DmnSpike.Dmn.Overlay do
     end
   end
 
-  defp prune_refs({t, a, k}, ids), do: {t, a, for(c <- k, keep_ref?(c, ids), do: if(is_tuple(c), do: prune_refs(c, ids), else: c))}
+  defp prune_refs({t, a, k}, ids),
+    do: {t, a, for(c <- k, keep_ref?(c, ids), do: if(is_tuple(c), do: prune_refs(c, ids), else: c))}
 
   defp keep_ref?(c, ids) when is_tuple(c) do
     case Dmn.attr(elem(c, 1), "dmnElementRef") do
@@ -449,16 +538,29 @@ defmodule DmnSpike.Dmn.Overlay do
 
   defp update_bounds(kids, {x, y, w, h}) do
     Enum.map(kids, fn
-      {t, a, k} = c -> if Dmn.local(t) == "Bounds", do: {t, put_attrs(a, [{"x", x}, {"y", y}, {"width", w}, {"height", h}]), k}, else: c
-      other -> other
+      {t, a, k} = c ->
+        if Dmn.local(t) == "Bounds",
+          do: {t, put_attrs(a, [{"x", x}, {"y", y}, {"width", w}, {"height", h}]), k},
+          else: c
+
+      other ->
+        other
     end)
   end
 
   defp regen_waypoints({t, a, k}, m, from, to, pre) do
     {x1, y1, x2, y2} = Svg.endpoints(m.nodes[from], m.nodes[to])
-    wp = Enum.find_value(k, pre.di <> "waypoint", fn c -> if is_tuple(c) and Dmn.local(elem(c, 0)) == "waypoint", do: elem(c, 0) end)
+
+    wp =
+      Enum.find_value(k, pre.di <> "waypoint", fn c ->
+        if is_tuple(c) and Dmn.local(elem(c, 0)) == "waypoint", do: elem(c, 0)
+      end)
+
     others = for c <- k, is_tuple(c), Dmn.local(elem(c, 0)) != "waypoint", do: from_simple(c)
-    {:el, t, a, [{:el, wp, [{"x", round(x1)}, {"y", round(y1)}], []}, {:el, wp, [{"x", round(x2)}, {"y", round(y2)}], []}] ++ others}
+
+    {:el, t, a,
+     [{:el, wp, [{"x", round(x1)}, {"y", round(y1)}], []}, {:el, wp, [{"x", round(x2)}, {"y", round(y2)}], []}] ++
+       others}
   end
 
   defp new_shape(n, pre) do
@@ -474,7 +576,10 @@ defmodule DmnSpike.Dmn.Overlay do
 
     q(
       {:el, "dmndi:DMNEdge", [{"id", "dmnedge-drg-#{rid}"}, {"dmnElementRef", rid}],
-       [{:el, "di:waypoint", [{"x", round(x1)}, {"y", round(y1)}], []}, {:el, "di:waypoint", [{"x", round(x2)}, {"y", round(y2)}], []}]},
+       [
+         {:el, "di:waypoint", [{"x", round(x1)}, {"y", round(y1)}], []},
+         {:el, "di:waypoint", [{"x", round(x2)}, {"y", round(y2)}], []}
+       ]},
       pre
     )
   end

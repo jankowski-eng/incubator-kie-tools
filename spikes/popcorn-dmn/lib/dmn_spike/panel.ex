@@ -82,7 +82,9 @@ defmodule DmnSpike.Panel do
     rules =
       for {rule, r} <- Enum.with_index(t.rules) do
         entries = for {e, i} <- Enum.with_index(rule.entries), do: ~s|<td>#{dt_ed(id, "e-#{r}-#{i}", e, errs)}</td>|
-        outs = for {o, j} <- Enum.with_index(rule.outs), do: ~s|<td class="out">#{dt_ed(id, "o-#{r}-#{j}", o, errs)}</td>|
+
+        outs =
+          for {o, j} <- Enum.with_index(rule.outs), do: ~s|<td class="out">#{dt_ed(id, "o-#{r}-#{j}", o, errs)}</td>|
 
         [
           ~s|<tr id="dr-#{id}-#{r}" class="#{rule_class(result, r)}"><td class="rn">#{r + 1}</td>|,
@@ -133,7 +135,11 @@ defmodule DmnSpike.Panel do
         )
 
     hl_ops =
-      hls |> List.flatten() |> Enum.map(fn {path, text} -> ["html", "#dhl-#{id}-#{path}", Highlight.html(text, err_span(tbl.errors[path]))] end)
+      hls
+      |> List.flatten()
+      |> Enum.map(fn {path, text} ->
+        ["html", "#dhl-#{id}-#{path}", Highlight.html(text, err_span(tbl.errors[path]))]
+      end)
 
     rows ++ hl_ops ++ [["html", "#dtv-#{id}", table_summary(result)]]
   end
@@ -151,7 +157,8 @@ defmodule DmnSpike.Panel do
       ~s|<div class="nodehead"><input class="nname" data-op="nname" data-id="#{node.id}" value="#{Fmt.esc(node.name)}" spellcheck="false"/>|,
       ~s|<label>type <select data-op="ntype" data-id="#{node.id}">#{opts}</select></label>|,
       if(node.type == :bkm,
-        do: ~s|<label>parameters <input class="params" data-op="nparams" data-id="#{node.id}" value="#{Fmt.esc(Enum.join(Model.params(node), ", "))}" placeholder="none" spellcheck="false"/></label>|,
+        do:
+          ~s|<label>parameters <input class="params" data-op="nparams" data-id="#{node.id}" value="#{Fmt.esc(Enum.join(Model.params(node), ", "))}" placeholder="none" spellcheck="false"/></label>|,
         else: ""
       ),
       ~s|<label>expression <select data-op="nexpr" data-id="#{node.id}"><option value="context"#{if Model.kind(node) == :context, do: " selected"}>literal / context</option><option value="table"#{if Model.kind(node) == :table, do: " selected"}>decision table</option>#{if Model.kind(node) == :raw, do: ~s|<option value="raw" selected disabled>#{Fmt.esc(node.expr.tag)} (kept, read-only)</option>|}</select></label>|,

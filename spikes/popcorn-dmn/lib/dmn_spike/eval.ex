@@ -25,7 +25,9 @@ defmodule DmnSpike.Eval do
 
         node_result = eval_node(m.nodes[id], env)
         # a business knowledge model's value is a function; its type is the return type
-        errors = if m.nodes[id].type == :bkm, do: [], else: DmnSpike.Types.validate(m, node_result.value, m.nodes[id].type_ref)
+        errors =
+          if m.nodes[id].type == :bkm, do: [], else: DmnSpike.Types.validate(m, node_result.value, m.nodes[id].type_ref)
+
         Map.put(acc, id, Map.put(node_result, :errors, errors))
     end
   end
@@ -77,9 +79,17 @@ defmodule DmnSpike.Eval do
 
     errors =
       Map.new(
-        (for {{:error, _} = e, i} <- Enum.with_index(inputs), do: {"h-#{i}", e}) ++
-          (for {r, ri} <- Enum.with_index(rules), {{:error, _} = e, i} <- Enum.with_index(r.tests), do: {"e-#{ri}-#{i}", e}) ++
-          (for {r, ri} <- Enum.with_index(rules), {{:error, _} = e, k} <- Enum.with_index(r.outs), do: {"o-#{ri}-#{k}", e})
+        for({{:error, _} = e, i} <- Enum.with_index(inputs), do: {"h-#{i}", e}) ++
+          for(
+            {r, ri} <- Enum.with_index(rules),
+            {{:error, _} = e, i} <- Enum.with_index(r.tests),
+            do: {"e-#{ri}-#{i}", e}
+          ) ++
+          for(
+            {r, ri} <- Enum.with_index(rules),
+            {{:error, _} = e, k} <- Enum.with_index(r.outs),
+            do: {"o-#{ri}-#{k}", e}
+          )
       )
 
     names = Enum.map(t.outputs, & &1.name)
@@ -98,7 +108,11 @@ defmodule DmnSpike.Eval do
   defp hit("FIRST", [{_, v} | _]), do: {v, nil}
 
   defp hit("ANY", [{_, v} | _] = m),
-    do: if(Enum.all?(m, fn {_, x} -> x == v end), do: {v, nil}, else: {nil, "matching rules disagree, ANY needs equal outputs"})
+    do:
+      if(Enum.all?(m, fn {_, x} -> x == v end),
+        do: {v, nil},
+        else: {nil, "matching rules disagree, ANY needs equal outputs"}
+      )
 
   defp hit(p, m) when p in ["COLLECT", "RULE ORDER"], do: {Enum.map(m, &elem(&1, 1)), nil}
   defp hit(_, _), do: {nil, "unsupported hit policy"}
