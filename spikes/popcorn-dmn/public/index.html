@@ -1,126 +1,603 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <title>Popcorn DMN spike</title>
+    <title>DMN Editor · Popcorn spike</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 1.5 22.5 12 12 22.5 1.5 12z' fill='%233b5bdb'/%3E%3C/svg%3E"
+    />
     <style>
       :root {
-        --muted: #6b7280;
-        --line: #8885;
-        --accent: #2563eb;
+        color-scheme: light dark;
+        --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+        --bg: #f4f6f9;
+        --surface: #ffffff;
+        --surface-2: #eff2f6;
+        --border: #e1e5eb;
+        --border-strong: #cdd3dc;
+        --text: #1a2230;
+        --muted: #667085;
+        --accent: #3b5bdb;
+        --accent-ink: #ffffff;
+        --accent-soft: #e9eeff;
+        --danger: #d13b4d;
+        --danger-soft: #fdeceb;
+        --warn: #a8610f;
+        --edge: #7a8497;
+        --grid: #d4dae3;
+        --shadow: rgba(23, 32, 50, 0.16);
+
+        --dec: #5b7fe0;
+        --dec-fill: #eaf0ff;
+        --inp: #3aa876;
+        --inp-fill: #e6f6ee;
+        --bkm: #cf982a;
+        --bkm-fill: #fff3d9;
+
         --k: #7c3aed;
         --n: #b45309;
         --s: #15803d;
-        --c: #6b7280;
+        --c: #8a93a1;
         --fn: #0e7490;
-        --bad: #dc2626;
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --muted: #9ca3af;
-          --accent: #60a5fa;
+          --bg: #0e1117;
+          --surface: #161b24;
+          --surface-2: #1e2430;
+          --border: #272e3b;
+          --border-strong: #38414f;
+          --text: #e7eaf0;
+          --muted: #97a1b2;
+          --accent: #7f96ff;
+          --accent-ink: #0e1117;
+          --accent-soft: #212b50;
+          --danger: #ff7c8a;
+          --danger-soft: #3b2027;
+          --warn: #f0b155;
+          --edge: #8b95a8;
+          --grid: #262d3a;
+          --shadow: rgba(0, 0, 0, 0.5);
+
+          --dec: #7f9bff;
+          --dec-fill: #1d2848;
+          --inp: #45c58d;
+          --inp-fill: #14332a;
+          --bkm: #e5b04a;
+          --bkm-fill: #3a2f15;
+
           --k: #c4b5fd;
           --n: #fbbf24;
           --s: #4ade80;
-          --c: #9ca3af;
+          --c: #8892a2;
           --fn: #22d3ee;
-          --bad: #f87171;
         }
       }
+
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
       body {
-        font-family: system-ui, sans-serif;
-        margin: 1rem;
-        max-width: 1100px;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 400 14px/1.45 var(--font);
+        -webkit-font-smoothing: antialiased;
       }
-      header {
+      ::selection {
+        background: color-mix(in srgb, var(--accent) 30%, transparent);
+      }
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+
+      /* ---- top bar ---------------------------------------------------------- */
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
         display: flex;
-        gap: 0.5rem;
+        flex-wrap: wrap;
         align-items: center;
-        margin-bottom: 0.5rem;
+        gap: 0.6rem 1rem;
+        padding: 0.65rem 1.25rem;
+        background: color-mix(in srgb, var(--surface) 92%, transparent);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--border);
       }
-      header span {
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+      .brand svg {
+        width: 20px;
+        height: 20px;
+        fill: var(--accent);
+      }
+      .brand small {
+        font-weight: 500;
         color: var(--muted);
-        font-size: 0.85rem;
+        padding: 0.1rem 0.45rem;
+        border-radius: 999px;
+        background: var(--surface-2);
+        font-size: 11px;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .toolbar .sep {
+        width: 1px;
+        height: 20px;
+        background: var(--border-strong);
+        margin: 0 0.25rem;
+      }
+      .topbar #status {
+        flex: 1 1 14rem;
+        min-width: 0;
+        text-align: right;
         margin-left: auto;
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
       }
-      button {
-        font: inherit;
-        padding: 0.25rem 0.7rem;
-      }
-      svg {
-        width: 100%;
-        border: 1px solid var(--line);
-        touch-action: none;
+
+      /* ---- buttons, inputs ---------------------------------------------------- */
+      button,
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        height: 30px;
+        padding: 0 0.75rem;
+        font: 500 13px/1 var(--font);
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 7px;
+        cursor: pointer;
+        transition:
+          background 0.12s,
+          border-color 0.12s,
+          box-shadow 0.12s;
         user-select: none;
       }
+      button:hover:not(:disabled),
+      .btn:hover {
+        background: var(--surface-2);
+      }
+      button:active:not(:disabled) {
+        transform: translateY(0.5px);
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .btn.primary,
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-ink);
+      }
+      .btn.primary:hover,
+      button.primary:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--accent) 88%, black);
+      }
+      input:not([type="checkbox"]):not([type="file"]),
+      select {
+        height: 30px;
+        padding: 0 0.55rem;
+        font: 400 13px var(--font);
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 7px;
+      }
+      input:not([type="checkbox"]):not([type="file"]):focus,
+      select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+      }
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+      }
+
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 3px;
+        background: var(--surface-2);
+        border-radius: 10px;
+      }
+      .tabs button {
+        height: 28px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        border-radius: 7px;
+      }
+      .tabs button:hover:not(:disabled) {
+        background: transparent;
+        color: var(--text);
+      }
+      .tabs button[aria-pressed="true"] {
+        background: var(--surface);
+        color: var(--text);
+        box-shadow:
+          0 1px 2px var(--shadow),
+          0 0 0 1px var(--border);
+      }
+
+      /* ---- page --------------------------------------------------------------- */
+      .page {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 1rem 1.25rem 3rem;
+      }
+      .report {
+        margin: 0 0 0.9rem;
+        padding: 0.6rem 0.9rem;
+        font-size: 13px;
+        background: var(--accent-soft);
+        border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+        border-radius: 10px;
+      }
+      .report:empty {
+        display: none;
+      }
+      .report .bad {
+        color: var(--danger);
+      }
+      .report ul.dropped {
+        margin: 0.3rem 0 0;
+        padding-left: 1.2rem;
+        color: var(--muted);
+      }
+
+      .canvas {
+        display: grid;
+        grid-template-columns: 12rem minmax(0, 1fr);
+        gap: 0.9rem;
+        align-items: start;
+      }
+      #palette {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding: 0.8rem;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
+      #palette h4 {
+        margin: 0 0 0.1rem;
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      #palette small {
+        margin-top: 0.3rem;
+        color: var(--muted);
+        font-size: 11.5px;
+        line-height: 1.4;
+      }
+      .pal {
+        padding: 0.5rem 0.6rem;
+        font-size: 12.5px;
+        font-weight: 550;
+        text-align: center;
+        border: 1.4px solid;
+        cursor: grab;
+        user-select: none;
+        transition:
+          transform 0.12s,
+          box-shadow 0.12s;
+      }
+      .pal:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 3px 8px var(--shadow);
+      }
+      .pal:active {
+        cursor: grabbing;
+      }
+      .pal.decision {
+        border-radius: 5px;
+        background: var(--dec-fill);
+        border-color: var(--dec);
+      }
+      .pal.input {
+        border-radius: 999px;
+        background: var(--inp-fill);
+        border-color: var(--inp);
+      }
+      .pal.bkm {
+        background: var(--bkm-fill);
+        border-color: var(--bkm);
+        clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%, 0 10px);
+        border-radius: 0;
+      }
+
+      .stage {
+        position: relative;
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: 0 1px 2px var(--shadow);
+      }
+      svg#drd {
+        display: block;
+        width: 100%;
+        height: auto;
+        min-height: 260px;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+        color: var(--edge);
+      }
+      svg#drd:active {
+        cursor: grabbing;
+      }
+      #grid {
+        pointer-events: none;
+      }
+      #dots circle {
+        fill: var(--grid);
+      }
+      .zoomctl {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 2;
+        display: flex;
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        box-shadow: 0 1px 3px var(--shadow);
+      }
+      .zoomctl button {
+        height: 28px;
+        min-width: 30px;
+        padding: 0 0.5rem;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+      .zoomctl button + button {
+        border-left: 1px solid var(--border);
+      }
+
+      /* ---- diagram ------------------------------------------------------------ */
       .node {
         cursor: grab;
+        filter: drop-shadow(0 1px 1.5px var(--shadow));
+        transition: filter 0.15s;
+      }
+      .node:hover {
+        filter: drop-shadow(0 3px 7px var(--shadow));
       }
       .node .shape {
-        fill: Canvas;
-        stroke: currentColor;
-        stroke-width: 1.2;
+        stroke-width: 1.4;
+        transition:
+          stroke 0.12s,
+          stroke-width 0.12s;
+      }
+      .node .shape.decision {
+        fill: var(--dec-fill);
+        stroke: var(--dec);
+      }
+      .node .shape.input {
+        fill: var(--inp-fill);
+        stroke: var(--inp);
+      }
+      .node .shape.bkm {
+        fill: var(--bkm-fill);
+        stroke: var(--bkm);
+      }
+      .node text {
+        fill: var(--text);
+        font: 600 12px var(--font);
+        letter-spacing: -0.005em;
+        pointer-events: none;
+        user-select: none;
+      }
+      .node text.nv {
+        fill: var(--muted);
+        font: 500 10.5px var(--mono);
+        letter-spacing: 0;
+      }
+      .node.sel {
+        filter: drop-shadow(0 0 0 transparent)
+          drop-shadow(0 4px 12px color-mix(in srgb, var(--accent) 38%, transparent));
       }
       .node.sel .shape {
         stroke: var(--accent);
         stroke-width: 2.6;
       }
-      .nv {
-        fill: var(--muted);
+      .node.invalid .shape {
+        stroke: var(--danger);
+        stroke-dasharray: 5 3;
+        fill: var(--danger-soft);
       }
+      .node .handle {
+        display: none;
+        fill: var(--accent);
+        stroke: var(--surface);
+        stroke-width: 2.5;
+        cursor: crosshair;
+      }
+      .node.sel .handle {
+        display: block;
+      }
+      .edge .hit {
+        stroke: transparent;
+        stroke-width: 12;
+        cursor: pointer;
+      }
+      .edge .vis {
+        stroke: var(--edge);
+        stroke-width: 1.5;
+        transition: stroke 0.12s;
+      }
+      .edge:hover .vis {
+        stroke: var(--muted);
+      }
+      .edge.sel .vis {
+        stroke: var(--accent);
+        stroke-width: 2.4;
+      }
+      #arrow-fill path {
+        fill: var(--edge);
+      }
+      #arrow-open path {
+        stroke: var(--edge);
+      }
+      #preview {
+        pointer-events: none;
+      }
+      #preview line {
+        stroke: var(--accent);
+      }
+
+      /* ---- node header and expression tables ----------------------------------- */
       #panel {
         margin-top: 1rem;
       }
       .hint {
+        margin: 0;
+        padding: 1.4rem;
+        text-align: center;
+        color: var(--muted);
+        border: 1px dashed var(--border-strong);
+        border-radius: 12px;
+      }
+      .nodehead {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.6rem 1rem;
+        margin-bottom: 0.7rem;
+      }
+      .nodehead label {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 12px;
         color: var(--muted);
       }
-      table.boxed {
-        border-collapse: collapse;
+      .nodehead .nname {
+        height: 36px;
+        min-width: 16rem;
+        font: 650 16px var(--font);
+        letter-spacing: -0.01em;
+      }
+      input.params {
+        width: 14rem;
+        font: 13px var(--mono);
+      }
+      .errs {
+        color: var(--danger);
+        font-size: 12.5px;
+      }
+
+      table.boxed,
+      table.types {
         width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        font-size: 13px;
+        box-shadow: 0 1px 2px var(--shadow);
       }
       table.boxed th,
-      table.boxed td {
-        border: 1px solid var(--line);
+      table.boxed td,
+      table.types th,
+      table.types td {
         padding: 0;
         vertical-align: top;
-      }
-      table.boxed thead th {
-        padding: 0.4rem 0.6rem;
         text-align: left;
-        background: color-mix(in srgb, var(--accent) 12%, Canvas);
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      table.boxed tr > :last-child,
+      table.types tr > :last-child {
+        border-right: 0;
+      }
+      table.boxed tbody tr:last-child > *,
+      table.types tbody tr:last-child > * {
+        border-bottom: 0;
+      }
+      table.boxed thead th,
+      table.types thead th {
+        padding: 0.5rem 0.75rem;
+        background: var(--surface-2);
+        color: var(--muted);
+        font-size: 11.5px;
+        font-weight: 650;
+        letter-spacing: 0.03em;
+      }
+      table.boxed:not(.dt) thead th {
+        font-size: 13px;
+        color: var(--text);
+        letter-spacing: 0;
       }
       table.boxed small {
-        font-weight: normal;
+        margin-left: 0.5rem;
+        font-weight: 500;
         color: var(--muted);
-        margin-left: 0.4rem;
       }
       th.lbl {
-        padding: 0.35rem 0.6rem;
-        text-align: left;
-        font:
-          13px ui-monospace,
-          monospace;
-        white-space: nowrap;
         width: 1%;
+        padding: 0.5rem 0.75rem !important;
+        white-space: nowrap;
+        font: 12px var(--mono);
+        color: var(--muted);
+        background: var(--surface-2);
       }
       td.val {
-        padding: 0.35rem 0.6rem;
         width: 22%;
-        font:
-          13px ui-monospace,
-          monospace;
+        padding: 0.45rem 0.75rem !important;
+        font: 12.5px/1.5 var(--mono);
+        background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
       }
       td.val .bad,
       .hl .err {
-        color: var(--bad);
+        color: var(--danger);
       }
       td.val .warn {
-        color: var(--muted);
         display: block;
-        font: 11px system-ui;
+        margin-top: 0.15rem;
+        font: 11.5px var(--font);
+        color: var(--warn);
       }
+
       .ed {
         position: relative;
         display: grid;
@@ -129,31 +606,28 @@
       .ed textarea {
         grid-area: 1 / 1;
         margin: 0;
-        padding: 0.35rem 0.6rem;
-        font:
-          13px/1.5 ui-monospace,
-          monospace;
+        padding: 0.5rem 0.75rem;
+        font: 12.5px/1.55 var(--mono);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         border: 0;
-        box-sizing: border-box;
       }
       .ed pre.hl {
         pointer-events: none;
       }
       .ed textarea {
-        background: transparent;
-        color: transparent;
-        caret-color: CanvasText;
+        width: 100%;
+        height: 100%;
         resize: none;
         overflow: hidden;
         outline: none;
-        width: 100%;
-        height: 100%;
+        background: transparent;
+        color: transparent;
+        caret-color: var(--text);
       }
       .ed:focus-within {
-        outline: 2px solid var(--accent);
-        outline-offset: -2px;
+        background: color-mix(in srgb, var(--accent) 6%, transparent);
+        box-shadow: inset 0 0 0 2px var(--accent);
       }
       .hl .k {
         color: var(--k);
@@ -176,7 +650,8 @@
         color: var(--muted);
       }
       .hl .err {
-        text-decoration: underline wavy var(--bad);
+        text-decoration: underline wavy var(--danger);
+        text-underline-offset: 3px;
       }
       .hl .eof::after {
         content: "\00a0\00a0";
@@ -185,381 +660,307 @@
         position: absolute;
         top: 100%;
         left: 0;
-        z-index: 5;
+        z-index: 8;
       }
       .ac ul {
+        margin: 4px 0 0;
+        padding: 4px;
         list-style: none;
-        margin: 0;
-        padding: 2px;
-        background: Canvas;
-        border: 1px solid var(--line);
-        box-shadow: 0 4px 12px #0003;
-        font:
-          13px ui-monospace,
-          monospace;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 9px;
+        box-shadow: 0 10px 28px var(--shadow);
+        font: 12.5px var(--mono);
       }
       .ac li {
-        padding: 0.2rem 0.6rem;
+        padding: 0.3rem 0.65rem;
+        border-radius: 6px;
         cursor: pointer;
       }
       .ac li:first-child {
-        background: color-mix(in srgb, var(--accent) 18%, Canvas);
+        background: var(--accent-soft);
       }
       .ac li:hover {
-        background: color-mix(in srgb, var(--accent) 28%, Canvas);
+        background: color-mix(in srgb, var(--accent) 22%, var(--surface));
       }
-      svg#drd {
-        flex: 1;
-        min-width: 0;
-      }
-      .canvas {
-        display: flex;
-        gap: 0.5rem;
-        align-items: flex-start;
-      }
-      #palette {
-        display: flex;
-        flex-direction: column;
-        gap: 0.4rem;
-        width: 9.5rem;
-        flex: none;
-      }
-      #palette small {
-        color: var(--muted);
-        font-size: 0.72rem;
-        line-height: 1.3;
-      }
-      .pal {
-        border: 1.2px solid currentColor;
-        padding: 0.5rem 0.4rem;
-        text-align: center;
-        font-size: 0.8rem;
-        cursor: grab;
-        background: Canvas;
-      }
-      .pal.input {
-        border-radius: 999px;
-      }
-      .pal.bkm {
-        clip-path: polygon(14px 0, 100% 0, 100% 100%, 0 100%, 0 14px);
-        border-color: transparent;
-        background: color-mix(in srgb, currentColor 14%, Canvas);
-      }
-      .tabs {
-        display: flex;
-        margin-right: 0.75rem;
-      }
-      .tabs button {
-        border-radius: 0;
-      }
-      .tabs button[aria-pressed="true"] {
-        background: var(--accent);
-        color: white;
-        border-color: var(--accent);
-      }
-      .node .handle {
-        display: none;
-        fill: var(--accent);
-        stroke: Canvas;
-        stroke-width: 2;
-        cursor: crosshair;
-      }
-      .node.sel .handle {
-        display: block;
-      }
-      .node.invalid .shape {
-        stroke: var(--bad);
-        stroke-dasharray: 5 3;
-      }
-      .edge .hit {
-        stroke: transparent;
-        stroke-width: 12;
-        cursor: pointer;
-      }
-      .edge.sel .vis {
-        stroke: var(--accent);
-        stroke-width: 2.6;
-      }
-      #preview {
-        pointer-events: none;
-      }
-      .nodehead {
-        display: flex;
-        gap: 0.75rem;
-        align-items: center;
-        flex-wrap: wrap;
-        margin-bottom: 0.4rem;
-      }
-      .nodehead .nname {
-        font: 600 15px system-ui;
-        padding: 0.25rem 0.4rem;
-        min-width: 14rem;
-      }
-      .nodehead select {
-        font: inherit;
-      }
-      .errs {
-        color: var(--bad);
-        font-size: 0.85rem;
-      }
-      table.types {
-        border-collapse: collapse;
-        width: 100%;
-        font-size: 13px;
-      }
-      table.types th,
-      table.types td {
-        border: 1px solid var(--line);
-        padding: 0.2rem 0.4rem;
-        vertical-align: top;
-        text-align: left;
-      }
-      table.types thead th {
-        background: color-mix(in srgb, var(--accent) 12%, Canvas);
-      }
-      table.types input[data-op="tname"] {
-        font:
-          13px ui-monospace,
-          monospace;
-        width: 100%;
-        box-sizing: border-box;
-      }
-      table.types td.cons {
-        min-width: 16rem;
-      }
-      table.types td.cons select {
-        margin-bottom: 0.2rem;
-      }
-      table.types small.bad {
-        color: var(--bad);
-        display: block;
-      }
-      table.types td.acts {
-        white-space: nowrap;
-        width: 1%;
-      }
-      [hidden] {
-        display: none !important;
-      }
+
+      /* decision tables */
       table.dt th.hp {
         width: 1%;
-        white-space: nowrap;
+        padding: 0.4rem 0.6rem;
         vertical-align: middle;
+        white-space: nowrap;
       }
       table.dt th.hp select {
-        font: 600 12px system-ui;
+        height: 26px;
+        font: 650 11.5px var(--font);
       }
-      table.dt th.in {
+      table.dt th.in,
+      table.dt th.outh {
         min-width: 9rem;
-        font-weight: normal;
+        padding: 0 !important;
+        font-weight: 400;
+        background: var(--surface);
+      }
+      table.dt th.outh.single {
+        padding: 0.5rem 0.75rem !important;
+        color: var(--text);
+        font-weight: 600;
+        font-size: 13px;
+        letter-spacing: 0;
+        vertical-align: middle;
+      }
+      table.dt th.in .ed,
+      table.dt th.outh .ed {
+        background: var(--surface);
       }
       table.dt th.in button,
+      table.dt th.outh button,
       table.dt td.rm button {
+        height: 20px;
+        padding: 0 0.35rem;
+        margin: 0 0.5rem 0.4rem;
         font-size: 11px;
-        padding: 0 0.3rem;
-        opacity: 0.6;
-      }
-      table.dt td.rn {
-        text-align: center;
         color: var(--muted);
-        font:
-          12px ui-monospace,
-          monospace;
-        width: 1%;
-        padding: 0.35rem 0.5rem;
-        vertical-align: middle;
+        border-color: transparent;
+        background: transparent;
+      }
+      table.dt th.in button:hover,
+      table.dt th.outh button:hover,
+      table.dt td.rm button:hover {
+        color: var(--danger);
+        background: var(--danger-soft);
       }
       table.dt td.rm {
-        vertical-align: middle;
         width: 1%;
+        vertical-align: middle;
       }
-      table.dt td.out .ed {
-        background: color-mix(in srgb, var(--accent) 6%, Canvas);
+      table.dt td.rm button {
+        margin: 0 0.3rem;
       }
-      table.dt tr.rule.hit td {
-        background: color-mix(in srgb, var(--accent) 14%, Canvas);
-      }
-      table.dt tr.rule.hit td.rn {
-        color: var(--accent);
-        font-weight: 700;
-      }
-      table.dt tfoot td {
-        padding: 0.35rem 0.5rem;
-        border: 0;
-      }
-      table.dt .dtv {
-        margin-left: 0.75rem;
-        font:
-          13px ui-monospace,
-          monospace;
-      }
-      table.dt .dtv .warn {
-        font: 12px system-ui;
-        color: var(--bad);
-      }
-      label.file span {
-        display: inline-block;
-        font: inherit;
-        padding: 0.25rem 0.7rem;
-        border: 1px solid var(--line);
-        border-radius: 3px;
-        cursor: pointer;
-        background: ButtonFace;
-        color: ButtonText;
-      }
-      .report {
-        font-size: 0.85rem;
-        margin: 0.4rem 0;
-        padding: 0.4rem 0.7rem;
-        border-left: 3px solid var(--accent);
-        background: color-mix(in srgb, var(--accent) 8%, Canvas);
-      }
-      .report:empty {
-        display: none;
-      }
-      .report .bad {
-        color: var(--bad);
-      }
-      .report ul.dropped {
-        margin: 0.25rem 0 0;
-        padding-left: 1.2rem;
+      table.dt td.rn {
+        width: 1%;
+        padding: 0.5rem 0.75rem !important;
+        text-align: center;
+        vertical-align: middle;
+        font: 12px var(--mono);
         color: var(--muted);
-      }
-      #xml {
-        margin: 0;
-        padding: 0.6rem;
-        border: 1px solid var(--line);
-        overflow: auto;
-        font:
-          12px/1.45 ui-monospace,
-          monospace;
-        max-height: 75vh;
-      }
-      .canvas {
-        position: relative;
-      }
-      .zoomctl {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        z-index: 2;
-        display: flex;
-        gap: 2px;
-      }
-      .zoomctl button {
-        min-width: 1.9rem;
-        padding: 0.15rem 0.45rem;
-      }
-      svg#drd {
-        cursor: grab;
-      }
-      header {
-        flex-wrap: wrap;
-        row-gap: 0.4rem;
-      }
-      header #status {
-        flex: 1 1 14rem;
-        min-width: 0;
-        text-align: right;
-        margin-left: auto;
-      }
-      table.dt th.outh {
-        min-width: 8rem;
-        font-weight: normal;
       }
       table.dt td.out {
         min-width: 8rem;
+        background: color-mix(in srgb, var(--accent) 5%, var(--surface));
       }
       table.dt th.noteh {
         width: 12%;
       }
       table.dt td.note {
         width: 12%;
-        padding: 0.2rem;
-        vertical-align: top;
+        padding: 0.3rem !important;
       }
       table.dt td.note input {
         width: 100%;
-        box-sizing: border-box;
-        font: 12px system-ui;
-        border: 1px solid var(--line);
+        height: 28px;
+        font: 12px var(--font);
         background: transparent;
-        color: inherit;
-        padding: 0.2rem 0.3rem;
       }
-      input.params {
-        font:
-          13px ui-monospace,
-          monospace;
-        width: 14rem;
+      table.dt tr.rule.hit > td {
+        background: var(--accent-soft);
+      }
+      table.dt tr.rule.hit > td.rn {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      table.dt tr.rule.hit > td.out {
+        background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+      }
+      table.dt tfoot td {
+        padding: 0.6rem 0.75rem;
+        border: 0;
+        background: var(--surface-2);
+      }
+      table.dt tfoot button {
+        height: 26px;
+        font-size: 12px;
+      }
+      table.dt .dtv {
+        margin-left: 0.85rem;
+        font: 12.5px var(--mono);
+      }
+      table.dt .dtv b {
+        color: var(--accent);
+      }
+      table.dt .dtv .warn {
+        font: 12px var(--font);
+        color: var(--danger);
+      }
+
+      /* data types */
+      table.types {
+        font-size: 13px;
+      }
+      table.types th,
+      table.types td {
+        padding: 0.4rem 0.6rem;
+      }
+      table.types tbody tr:hover > td {
+        background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+      }
+      table.types input[data-op="tname"] {
+        width: 100%;
+        height: 28px;
+        font: 13px var(--mono);
+      }
+      table.types select {
+        height: 28px;
+      }
+      table.types td.cons {
+        min-width: 17rem;
+      }
+      table.types td.cons select {
+        margin-bottom: 0.3rem;
+      }
+      table.types td.cons .ed {
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: var(--surface);
+      }
+      table.types small.bad {
+        display: block;
+        margin-top: 0.2rem;
+        color: var(--danger);
+      }
+      table.types td.acts {
+        width: 1%;
+        white-space: nowrap;
+      }
+      table.types td.acts button {
+        height: 26px;
+        font-size: 12px;
+      }
+      #types > p {
+        margin: 0.9rem 0 0;
+      }
+
+      #xml {
+        margin: 0;
+        padding: 1rem 1.2rem;
+        max-height: 78vh;
+        overflow: auto;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        font: 12.5px/1.6 var(--mono);
+        color: var(--text);
+        box-shadow: 0 1px 2px var(--shadow);
+      }
+
+      @media (max-width: 820px) {
+        .canvas {
+          grid-template-columns: 1fr;
+        }
+        #palette {
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+        #palette small,
+        #palette h4 {
+          flex-basis: 100%;
+        }
+        .topbar #status {
+          text-align: left;
+          margin-left: 0;
+        }
       }
     </style>
   </head>
   <body>
-    <header>
+    <header class="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.5 22.5 12 12 22.5 1.5 12z" /></svg>
+        <span>DMN Editor</span><small>Popcorn spike</small>
+      </div>
       <nav class="tabs">
         <button data-click="tab:editor" aria-pressed="true">Editor</button>
         <button data-click="tab:types" aria-pressed="false">Data types</button>
         <button data-click="tab:xml" aria-pressed="false">XML</button>
       </nav>
-      <button data-click="undo" disabled>↶ Undo</button><button data-click="redo" disabled>↷ Redo</button>
-      <button data-click="layout" title="Arrange nodes in layers">Auto-layout</button>
-      <label class="file" title="Open a .dmn file"
-        ><span>Import…</span><input id="file" type="file" accept=".dmn,.xml" hidden
-      /></label>
-      <button data-click="export" title="Download DMN XML">Export</button>
+      <div class="toolbar">
+        <button data-click="undo" disabled title="Undo (⌘Z)">↶ Undo</button>
+        <button data-click="redo" disabled title="Redo (⇧⌘Z)">↷ Redo</button>
+        <span class="sep"></span>
+        <button data-click="layout" title="Arrange nodes in layers">Auto-layout</button>
+        <span class="sep"></span>
+        <label class="btn" title="Open a .dmn file"
+          ><span>Import…</span><input id="file" type="file" accept=".dmn,.xml" hidden
+        /></label>
+        <button class="primary" data-click="export" title="Download DMN XML">Export</button>
+      </div>
       <span id="status">Starting Popcorn...</span>
     </header>
-    <div id="report" class="report"></div>
-    <section id="view-editor">
-      <div class="canvas">
-        <div id="palette" title="Drag onto the canvas">
-          <div class="pal decision" draggable="true" data-kind="decision">Decision</div>
-          <div class="pal input" draggable="true" data-kind="input">Input data</div>
-          <div class="pal bkm" draggable="true" data-kind="bkm">Business knowledge</div>
-          <small
-            >Drag onto the canvas. Drag a selected node's top handle onto another node to connect. Delete removes the
-            selection.</small
-          >
-        </div>
-        <div class="zoomctl">
-          <button data-click="zoom-in" title="Zoom in">+</button
-          ><button data-click="zoom-out" title="Zoom out">−</button
-          ><button data-click="fit" title="Fit diagram">Fit</button>
-        </div>
-        <svg id="drd" viewBox="0 0 820 370">
-          <defs>
-            <marker
-              id="arrow-fill"
-              viewBox="0 0 10 10"
-              refX="10"
-              refY="5"
-              markerWidth="9"
-              markerHeight="9"
-              orient="auto-start-reverse"
+
+    <main class="page">
+      <div id="report" class="report"></div>
+
+      <section id="view-editor">
+        <div class="canvas">
+          <div id="palette" title="Drag onto the canvas">
+            <h4>Add element</h4>
+            <div class="pal decision" draggable="true" data-kind="decision">Decision</div>
+            <div class="pal input" draggable="true" data-kind="input">Input data</div>
+            <div class="pal bkm" draggable="true" data-kind="bkm">Business knowledge</div>
+            <small
+              >Drag onto the canvas. Drag a selected node's top handle onto another node to connect. Delete removes the
+              selection.</small
             >
-              <path d="M0 0L10 5L0 10z" fill="currentColor" />
-            </marker>
-            <marker
-              id="arrow-open"
-              viewBox="0 0 10 10"
-              refX="10"
-              refY="5"
-              markerWidth="9"
-              markerHeight="9"
-              orient="auto-start-reverse"
-            >
-              <path d="M0 0L10 5L0 10" fill="none" stroke="currentColor" stroke-width="1.4" />
-            </marker>
-          </defs>
-          <g id="scene"></g>
-          <g id="preview"></g>
-        </svg>
-      </div>
-      <div id="panel"></div>
-    </section>
-    <section id="view-types" hidden><div id="types"></div></section>
-    <section id="view-xml" hidden><pre id="xml"></pre></section>
+          </div>
+          <div class="stage">
+            <div class="zoomctl">
+              <button data-click="zoom-in" title="Zoom in">+</button
+              ><button data-click="zoom-out" title="Zoom out">−</button
+              ><button data-click="fit" title="Fit diagram">Fit</button>
+            </div>
+            <svg id="drd" viewBox="0 0 820 370">
+              <defs>
+                <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+                  <circle cx="1" cy="1" r="1" />
+                </pattern>
+                <marker
+                  id="arrow-fill"
+                  viewBox="0 0 10 10"
+                  refX="10"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0 0L10 5L0 10z" />
+                </marker>
+                <marker
+                  id="arrow-open"
+                  viewBox="0 0 10 10"
+                  refX="10"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0 0L10 5L0 10" fill="none" stroke-width="1.5" />
+                </marker>
+              </defs>
+              <rect id="grid" x="-50000" y="-50000" width="100000" height="100000" fill="url(#dots)" />
+              <g id="scene"></g>
+              <g id="preview"></g>
+            </svg>
+          </div>
+        </div>
+        <div id="panel"></div>
+      </section>
+
+      <section id="view-types" hidden><div id="types"></div></section>
+      <section id="view-xml" hidden><pre id="xml"></pre></section>
+    </main>
+
     <script type="module">
       import { Popcorn } from "./out/index.mjs";
       const t0 = performance.now();
@@ -570,10 +971,10 @@
           timeoutsMs: { boot: 120000, appStartup: 120000 },
         });
         console.log(`popcorn booted in ${Math.round(performance.now() - t0)} ms`);
-        document.title = "BOOTED";
+        document.documentElement.dataset.popcorn = "booted";
       } catch (e) {
         document.querySelector("#status").textContent = "Popcorn failed: " + (e && (e.message || JSON.stringify(e)));
-        document.title = "FAILED";
+        document.documentElement.dataset.popcorn = "failed";
       }
     </script>
   </body>

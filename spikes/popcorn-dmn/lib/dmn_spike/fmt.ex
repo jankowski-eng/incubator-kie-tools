@@ -15,7 +15,7 @@ defmodule DmnSpike.Fmt do
   def value(v) when is_list(v), do: "[" <> Enum.map_join(v, ", ", &value/1) <> "]"
   def value(v), do: inspect(v, limit: 12, printable_limit: 60)
 
-  def short(v, max \\ 22) do
+  def short(v, max \\ 18) do
     s = value(v)
     if String.length(s) > max, do: String.slice(s, 0, max - 1) <> "…", else: s
   end

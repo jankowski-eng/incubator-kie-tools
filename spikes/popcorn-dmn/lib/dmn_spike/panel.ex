@@ -64,7 +64,7 @@ defmodule DmnSpike.Panel do
     outputs =
       for {o, j} <- Enum.with_index(t.outputs) do
         if k == 1 do
-          ~s|<th class="outh">#{Fmt.esc(node.name)}</th>|
+          ~s|<th class="outh single">#{Fmt.esc(node.name)}</th>|
         else
           ~s|<th class="outh">#{dt_ed(id, "n-#{j}", o.name, errs)}<button data-click="dt-del-output:#{id}:#{j}" title="Delete output column">✕</button></th>|
         end

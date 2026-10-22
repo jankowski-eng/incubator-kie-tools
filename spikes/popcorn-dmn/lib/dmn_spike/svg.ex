@@ -97,12 +97,13 @@ defmodule DmnSpike.Svg do
     ]
   end
 
-  defp shape(%{type: :decision} = n), do: ~s|<rect class="shape" width="#{n.w}" height="#{n.h}"/>|
-  defp shape(%{type: :input} = n), do: ~s|<rect class="shape" width="#{n.w}" height="#{n.h}" rx="#{div(n.h, 2)}"/>|
+  defp shape(%{type: :decision} = n), do: ~s|<rect class="shape decision" width="#{n.w}" height="#{n.h}" rx="5"/>|
+  defp shape(%{type: :input} = n), do: ~s|<rect class="shape input" width="#{n.w}" height="#{n.h}" rx="#{div(n.h, 2)}"/>|
 
+  # business knowledge: a rectangle with both top corners cut
   defp shape(%{type: :bkm} = n) do
     c = 14
-    pts = [{c, 0}, {n.w, 0}, {n.w, n.h}, {0, n.h}, {0, c}]
-    ~s|<polygon class="shape" points="#{Enum.map_join(pts, " ", fn {x, y} -> "#{x},#{y}" end)}"/>|
+    pts = [{c, 0}, {n.w - c, 0}, {n.w, c}, {n.w, n.h}, {0, n.h}, {0, c}]
+    ~s|<polygon class="shape bkm" points="#{Enum.map_join(pts, " ", fn {x, y} -> "#{x},#{y}" end)}" stroke-linejoin="round"/>|
   end
 end
