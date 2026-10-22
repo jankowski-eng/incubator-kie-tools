@@ -142,7 +142,10 @@ defmodule DmnSpike.Dmn do
     desc = if Model.description(n) == "", do: [], else: [el("description", [], [n.description])]
     # the schema puts extensionElements (the value of an input) before the variable
     {ext, body} = if n.type == :input, do: {body, []}, else: {[], body}
-    el(tag, [{"id", n.id}, {"name", n.name}], desc ++ ext ++ [var] ++ info ++ know ++ authority_xml(m, n) ++ body)
+    reqs = info ++ know ++ authority_xml(m, n)
+    # a business knowledge model's logic comes before its requirements; a decision's expression after them
+    tail = if n.type == :bkm, do: body ++ reqs, else: reqs ++ body
+    el(tag, [{"id", n.id}, {"name", n.name}], desc ++ ext ++ [var] ++ tail)
   end
 
   @doc false
@@ -224,9 +227,12 @@ defmodule DmnSpike.Dmn do
   def expression_xml(%{rows: [], result: text}), do: literal(text)
 
   def expression_xml(%{rows: rows, result: result}) do
+    # no result entry: the context's value is the context itself (see Eval)
+    final = if result == "", do: [], else: [el("contextEntry", [], literal(result))]
+
     entries =
       Enum.map(rows, fn r -> el("contextEntry", [], [el("variable", [{"name", r.name}], []) | literal(r.text)]) end) ++
-        [el("contextEntry", [], literal(result))]
+        final
 
     [el("context", [], entries)]
   end
@@ -267,8 +273,21 @@ defmodule DmnSpike.Dmn do
     cond do
       kids == [] -> open <> "/>\n"
       Enum.all?(kids, &is_binary/1) -> open <> ">" <> Enum.map_join(kids, "", &esc/1) <> "</" <> tag <> ">\n"
+      # text mixed with elements: written as it was, without indentation that would add text
+      Enum.any?(kids, &is_binary/1) -> open <> ">" <> inline(kids) <> "</" <> tag <> ">\n"
       true -> open <> ">\n" <> Enum.map_join(kids, "", &render(&1, depth + 1)) <> pad <> "</" <> tag <> ">\n"
     end
+  end
+
+  defp inline(kids) do
+    Enum.map_join(kids, "", fn
+      text when is_binary(text) ->
+        esc(text)
+
+      {:el, tag, attrs, kids} ->
+        open = "<" <> tag <> Enum.map_join(attrs, "", fn {k, v} -> ~s| #{k}="#{esc_attr(to_string(v))}"| end)
+        if kids == [], do: open <> "/>", else: open <> ">" <> inline(kids) <> "</" <> tag <> ">"
+    end)
   end
 
   defp esc(s), do: s |> String.replace("&", "&amp;") |> String.replace("<", "&lt;") |> String.replace(">", "&gt;")
@@ -332,7 +351,10 @@ defmodule DmnSpike.Dmn do
     children = Enum.filter(children, &is_tuple/1)
     dropped = children |> Enum.map(&local(elem(&1, 0))) |> Enum.reject(&(&1 in @known_top)) |> Enum.frequencies()
 
-    types = for {tag, _, _} = e <- children, local(tag) == "itemDefinition", do: item(e)
+    # a type remembers its name in the file, so that a rename is not taken for a delete and an insert
+    types =
+      for {tag, _, _} = e <- children, local(tag) == "itemDefinition", t = item(e), do: Map.put(t, :origin, t.name)
+
     {nodes, notes} = for({tag, _, _} = e <- children, @elements[local(tag)], do: read_node(e)) |> Enum.unzip()
     nodes = Map.new(nodes, &{&1.id, &1})
     reqs = requirements(children, nodes)
@@ -569,7 +591,7 @@ defmodule DmnSpike.Dmn do
          end) do
       {t, _, k} = e ->
         case local(t) do
-          "literalExpression" -> {:literal, text(find(k, "text"))}
+          "literalExpression" -> {:literal, text(find(k, "text")) || ""}
           "invocation" -> invocation(e)
           "context" -> {:context, Enum.filter(k, &(is_tuple(&1) and local(elem(&1, 0)) == "contextEntry")), []}
           "decisionTable" -> table(e)
@@ -647,7 +669,16 @@ defmodule DmnSpike.Dmn do
     end
   end
 
-  defp table({_, attrs, kids}) do
+  # an aggregated COLLECT table (SUM, MIN, ...) would be evaluated as a plain COLLECT, which gives the wrong
+  # value, so it is kept as it is in the file, read-only
+  defp table({_, attrs, _} = e) do
+    case attr(attrs, "aggregation") do
+      nil -> editable_table(e)
+      agg -> {:other, "decisionTable with aggregation #{agg}"}
+    end
+  end
+
+  defp editable_table({_, attrs, kids}) do
     kids = Enum.filter(kids, &is_tuple/1)
 
     inputs =
@@ -674,10 +705,7 @@ defmodule DmnSpike.Dmn do
       if(length(annotations) > 1,
         do: ["kept: #{length(annotations) - 1} further annotation columns, not shown (kept until the table is edited)"],
         else: []
-      ) ++
-        if attr(attrs, "aggregation"),
-          do: ["kept: aggregation #{attr(attrs, "aggregation")}, not shown (kept until the table is edited)"],
-          else: []
+      )
 
     {:table,
      %{

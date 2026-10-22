@@ -314,7 +314,7 @@ defmodule DmnSpikeTest do
       assert {:ok, m2, report} = Dmn.from_xml(xml)
       assert m2.nodes == m.nodes
       assert Enum.sort(m2.edges) == Enum.sort(m.edges)
-      assert m2.types == m.types
+      assert Enum.map(m2.types, &Map.delete(&1, :origin)) == m.types
       assert report.dropped == %{} and report.name == "Loan" and report.placed == 0
     end
 
@@ -1033,6 +1033,196 @@ defmodule DmnSpikeTest do
       assert Types.validate(m, days, "years and months duration") != []
       assert Types.validate(m, dt, "date") != []
       assert Types.validate(m, date, "context") != [], "a date is not a context"
+    end
+  end
+
+  describe "review round two (fidelity and semantics)" do
+    alias DmnSpike.Dmn
+
+    @ns ~s|xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="d" id="d1"|
+    defp doc(body), do: ~s|<definitions #{@ns}>#{body}</definitions>|
+    defp import_xml!(xml), do: Dmn.from_xml(xml) |> then(fn {:ok, m, r} -> {m, r} end)
+
+    test "a business knowledge model writes its logic before its requirements" do
+      {:ok, m, a} = Model.add_required(Model.sample(), "dti", "bkm")
+      {:ok, m, _} = Model.add_required(m, "dti", "source")
+      xml = Dmn.to_xml(m)
+      [bkm] = Regex.run(~r/<businessKnowledgeModel id="dti".*?<\/businessKnowledgeModel>/s, xml)
+      at = fn tag -> bkm |> :binary.match("<" <> tag) |> elem(0) end
+      assert at.("encapsulatedLogic") < at.("knowledgeRequirement")
+      assert at.("encapsulatedLogic") < at.("authorityRequirement")
+      assert a
+    end
+
+    test "an empty literal expression opens and evaluates" do
+      {m, _} =
+        import_xml!(doc(~s|<decision id="a" name="A"><variable id="v" name="A"/><literalExpression/></decision>|))
+
+      assert m.nodes["a"].expr.result == ""
+      assert Eval.run(m)["a"].value == nil
+    end
+
+    test "a context with no result entry is the context itself, and is written without one" do
+      xml =
+        doc("""
+        <decision id="a" name="A"><variable id="v" name="A"/>
+          <context><contextEntry><variable name="x"/><literalExpression><text>1</text></literalExpression></contextEntry></context>
+        </decision>
+        <decision id="b" name="B"><variable id="w" name="B"/>
+          <informationRequirement id="r"><requiredDecision href="#a"/></informationRequirement>
+          <literalExpression><text>A.x + 1</text></literalExpression>
+        </decision>
+        """)
+
+      {m, _} = import_xml!(xml)
+      r = Eval.run(m)
+      assert r["a"].value == %{"x" => Decimal.new(1)}
+      assert Decimal.equal?(r["b"].value, 2)
+      out = m |> Model.set_text("a", 0, "2") |> Dmn.to_xml()
+      assert length(Regex.scan(~r/<contextEntry/, out)) == 1, "no empty result entry was added"
+    end
+
+    test "an aggregated COLLECT table is kept read-only instead of being evaluated as a plain COLLECT" do
+      xml =
+        doc("""
+        <decision id="a" name="A"><variable id="v" name="A"/>
+          <decisionTable hitPolicy="COLLECT" aggregation="SUM"><output id="o"/>
+            <rule><outputEntry><text>2</text></outputEntry></rule><rule><outputEntry><text>3</text></outputEntry></rule>
+          </decisionTable>
+        </decision>
+        """)
+
+      {m, r} = import_xml!(xml)
+      assert %{kind: :raw, tag: "decisionTable with aggregation SUM"} = m.nodes["a"].expr
+      assert r.kept["a: decisionTable with aggregation SUM expression, read-only"] == 1 or map_size(r.kept) > 0
+      assert Eval.run(m)["a"].value == nil
+      assert Dmn.to_xml(m) =~ ~s|aggregation="SUM"|
+    end
+
+    test "a requirement with a description before its reference keeps its id when the decision is renamed" do
+      xml =
+        doc("""
+        <inputData id="i" name="In"><variable id="iv" name="In"/></inputData>
+        <decision id="a" name="A"><variable id="v" name="A"/>
+          <informationRequirement id="keep"><description>why</description><requiredInput href="#i"/></informationRequirement>
+          <literalExpression><text>In</text></literalExpression>
+        </decision>
+        """)
+
+      {m, _} = import_xml!(xml)
+      out = m |> Model.rename("a", "A2") |> Dmn.to_xml()
+      assert out =~ ~s|<informationRequirement id="keep">|
+      assert out =~ "<description>why</description>"
+      refute out =~ "_req-i-a"
+    end
+
+    test "text mixed with elements survives untouched" do
+      xml =
+        doc("""
+        <inputData id="i" name="In"><variable id="iv" name="In"/>
+          <extensionElements><note>Hello <b>big</b> world!</note></extensionElements>
+        </inputData>
+        """)
+
+      {m, _} = import_xml!(xml)
+      assert Dmn.to_xml(m) =~ "<note>Hello <b>big</b> world!</note>"
+      assert m |> Model.rename("i", "In2") |> Dmn.to_xml() =~ "<note>Hello <b>big</b> world!</note>"
+    end
+
+    test "renaming a type keeps its element, and preserved references follow the new name" do
+      {m, _} = import_xml!(File.read!("test/fixtures/Sample.dmn"))
+      i = Enum.find_index(m.types, &(&1.name == "Credit_Score_Rating"))
+      original = File.read!("test/fixtures/Sample.dmn")
+      [_, id] = Regex.run(~r/<dmn:itemDefinition id="([^"]+)"[^>]*name="Credit_Score_Rating"/, original) || [nil, nil]
+      assert id
+      out = m |> Types.rename_top(i, "Score_Band") |> Dmn.to_xml()
+      assert out =~ ~r/<dmn:itemDefinition id="#{id}"[^>]*name="Score_Band"/, "same element, same id"
+      refute out =~ ~s|"Credit_Score_Rating"|, "no reference to the old name is left"
+      refute out =~ ">Credit_Score_Rating<"
+      {:ok, m2, _} = Dmn.from_xml(out)
+      assert Enum.any?(m2.types, &(&1.name == "Score_Band"))
+      assert m2.nodes |> Map.values() |> Enum.all?(&(&1.type_ref != "Credit_Score_Rating"))
+    end
+
+    test "a variable keeps its own description and extensions when its node is renamed" do
+      xml =
+        doc("""
+        <decision id="a" name="A">
+          <variable id="v" name="A"><description>var doc</description><extensionElements><x/></extensionElements></variable>
+          <literalExpression><text>1</text></literalExpression>
+        </decision>
+        """)
+
+      {m, _} = import_xml!(xml)
+      out = m |> Model.rename("a", "A2") |> Dmn.to_xml()
+      assert out =~ ~s|<variable id="v" name="A2">|
+      assert out =~ "<description>var doc</description>"
+      assert out =~ "<extensionElements>"
+    end
+
+    test "editing a table cell keeps the ids, typeRefs and unknown children of the table" do
+      original = File.read!("test/fixtures/Sample.dmn")
+      {m, _} = import_xml!(original)
+      id = Enum.find_value(m.nodes, fn {k, n} -> if n.name == "Loan Pre-Qualification", do: k end)
+      out = m |> Model.set_table_text(id, ["e", 0, 0], ~s|"Poor"|) |> Dmn.to_xml()
+
+      ids = fn xml -> Regex.scan(~r/\bid="([^"]+)"/, xml) |> Enum.map(&List.last/1) |> Enum.sort() end
+      refs = fn xml -> Regex.scan(~r/typeRef="([^"]+)"/, xml) |> Enum.map(&List.last/1) |> Enum.sort() end
+      assert refs.(out) == refs.(original), "typeRefs of the table's columns are still there"
+      assert ids.(out) == ids.(original), "no id was lost or invented"
+    end
+
+    test "editing a business knowledge model body keeps its formal parameters' ids and types" do
+      xml =
+        doc("""
+        <businessKnowledgeModel id="k" name="K"><variable id="kv" name="K"/>
+          <encapsulatedLogic id="el"><formalParameter id="p1" name="x" typeRef="number"/>
+            <literalExpression id="le"><text>x + 1</text></literalExpression></encapsulatedLogic>
+        </businessKnowledgeModel>
+        """)
+
+      {m, _} = import_xml!(xml)
+      out = m |> Model.set_text("k", 0, "x + 2") |> Dmn.to_xml()
+      assert out =~ ~s|<formalParameter id="p1" name="x" typeRef="number"/>|
+      assert out =~ ~s|<encapsulatedLogic id="el">|
+      assert out =~ ~s|<literalExpression id="le">|
+      assert out =~ "x + 2"
+    end
+
+    test "an input's value is replaced when the spike namespace has another prefix" do
+      xml =
+        ~s|<definitions #{@ns} xmlns:p="urn:popcorn-dmn-spike"><inputData id="i" name="In"><variable id="iv" name="In"/><extensionElements><p:value>1</p:value></extensionElements></inputData></definitions>|
+
+      {m, _} = import_xml!(xml)
+      assert m.nodes["i"].expr.result == "1"
+      out = m |> Model.set_text("i", 0, "2") |> Dmn.to_xml()
+      assert length(Regex.scan(~r/<p:value>/, out)) == 1
+      {m2, _} = import_xml!(out)
+      assert m2.nodes["i"].expr.result == "2"
+    end
+
+    test "an expression constraint on a list constrains the whole list; enumerations still check each item" do
+      m = Model.sample()
+
+      list = %{
+        name: "tList",
+        ref: "number",
+        collection: true,
+        constraint: %{kind: :expression, text: "count(?) > 1"},
+        components: []
+      }
+
+      m = %{m | types: m.types ++ [list]}
+      two = [Decimal.new(1), Decimal.new(2)]
+      assert Types.validate(m, two, "tList") == []
+      assert Types.validate(m, [Decimal.new(1)], "tList") != []
+      assert Types.validate(m, [], "tList") != [], "an empty list does not bypass it"
+      assert Types.validate(m, ["a", "b"], "tList") != [], "items must still be numbers"
+
+      each = %{list | name: "tEach", constraint: %{kind: :range, text: "[0..5]"}}
+      m = %{m | types: m.types ++ [each]}
+      assert Types.validate(m, [Decimal.new(1), Decimal.new(9)], "tEach") != []
+      assert Types.validate(m, [Decimal.new(1)], "tEach") == []
     end
   end
 

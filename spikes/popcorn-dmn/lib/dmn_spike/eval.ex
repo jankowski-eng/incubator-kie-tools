@@ -52,16 +52,21 @@ defmodule DmnSpike.Eval do
   end
 
   defp eval_node(node, env) do
-    {cells, _env, last} =
-      Enum.reduce(Model.cells(node), {[], env, nil}, fn {label, text}, {acc, env, _} ->
+    {cells, _env, last, context} =
+      Enum.reduce(Model.cells(node), {[], env, nil, %{}}, fn {label, text}, {acc, env, _, ctx} ->
         result = eval(text, env)
         value = value_of(result)
-        env = if is_binary(label), do: Map.put(env, label, value), else: env
-        {[result | acc], env, value}
+        {env, ctx} = if is_binary(label), do: {Map.put(env, label, value), Map.put(ctx, label, value)}, else: {env, ctx}
+        {[result | acc], env, value, ctx}
       end)
 
-    %{value: last, cells: Enum.reverse(cells)}
+    # a context without a result entry is the context itself, not null
+    value = if context_only?(node), do: context, else: last
+    %{value: value, cells: Enum.reverse(cells)}
   end
+
+  defp context_only?(%{expr: %{rows: [_ | _], result: result}}), do: String.trim(result) == ""
+  defp context_only?(_), do: false
 
   # --- decision tables -------------------------------------------------------------
 
@@ -137,7 +142,7 @@ defmodule DmnSpike.Eval do
 
   defp body_text(%{expr: %{rows: rows, result: result}}) do
     entries = Enum.map_join(rows, ", ", &"#{&1.name}: #{blank_null(&1.text)}")
-    "{#{entries}, __result: #{blank_null(result)}}.__result"
+    if String.trim(result) == "", do: "{#{entries}}", else: "{#{entries}, __result: #{result}}.__result"
   end
 
   defp blank_null(text), do: if(String.trim(text) == "", do: "null", else: text)

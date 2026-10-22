@@ -149,9 +149,10 @@ defmodule DmnSpike.Dmn.Overlay do
     end
   end
 
+  # the element a requirement points at; children without an href (a description, extensions) are skipped
   defp req_from(kids) do
     Enum.find_value(kids, fn
-      {_, a, _} -> a |> Dmn.attr("href") |> to_string() |> String.split("#") |> List.last()
+      {_, a, _} -> if href = Dmn.attr(a, "href"), do: href |> String.split("#") |> List.last()
       _ -> nil
     end)
   end
@@ -175,9 +176,40 @@ defmodule DmnSpike.Dmn.Overlay do
         do: out,
         else: out ++ [dmndi_el(m, doc, pre, ids_out)]
 
+    out = rename_type_refs(out, renamed_types(m))
     root_attrs = ensure_decls(doc.root_attrs, out)
     header = ~s|<?xml version="1.0" encoding="UTF-8"?>\n| <> if(doc.prolog == "", do: "", else: doc.prolog <> "\n")
     header <> Dmn.render({:el, doc.root_tag, root_attrs, out}, 0)
+  end
+
+  # --- renamed types -----------------------------------------------------------------
+
+  # imported types remember the name they had in the file (`origin`); a rename must also reach the
+  # references that are written back untouched (inputExpression/output/formalParameter typeRef, ...)
+  defp renamed_types(m) do
+    current = MapSet.new(m.types, & &1.name)
+
+    for %{origin: old, name: new} <- m.types, old != new, not MapSet.member?(current, old), into: %{}, do: {old, new}
+  end
+
+  defp rename_type_refs(items, map) when map_size(map) == 0, do: items
+
+  defp rename_type_refs(items, map) do
+    Enum.map(items, fn
+      {:el, tag, attrs, kids} ->
+        attrs = for {k, v} <- attrs, do: {k, if(Dmn.local(k) == "typeRef", do: Map.get(map, v, v), else: v)}
+
+        kids =
+          case {Dmn.local(tag), kids} do
+            {"typeRef", [text]} when is_binary(text) -> [Map.get(map, String.trim(text), text)]
+            _ -> rename_type_refs(kids, map)
+          end
+
+        {:el, tag, attrs, kids}
+
+      other ->
+        other
+    end)
   end
 
   # --- prefixes ---------------------------------------------------------------------
@@ -244,11 +276,25 @@ defmodule DmnSpike.Dmn.Overlay do
 
   # --- raw <-> element trees -----------------------------------------------------------
 
-  # Saxy simple form -> the writer's tree; whitespace between elements is dropped, text in leaves is kept
+  # Saxy simple form -> the writer's tree. Whitespace between elements is dropped and text in leaves is kept;
+  # text mixed with elements is meaningful, so it is kept, in order.
   def from_simple({tag, attrs, kids}) do
     elems = Enum.filter(kids, &is_tuple/1)
-    {:el, tag, attrs, if(elems == [], do: kids, else: Enum.map(elems, &from_simple/1))}
+
+    kids =
+      cond do
+        elems == [] -> kids
+        Enum.any?(kids, &(is_binary(&1) and String.trim(&1) != "")) -> Enum.map(kids, &mixed_child/1)
+        true -> Enum.map(elems, &from_simple/1)
+      end
+
+    {:el, tag, attrs, kids}
   end
+
+  defp mixed_child(k) when is_tuple(k), do: from_simple(k)
+  defp mixed_child(text), do: text
+
+  defp kept_children(kids), do: for(k <- kids, is_tuple(k), do: from_simple(k))
 
   defp collect_ids(items) do
     Enum.flat_map(items, fn {:el, _, attrs, kids} ->
@@ -284,7 +330,7 @@ defmodule DmnSpike.Dmn.Overlay do
   defp children_out(m, doc, pre) do
     new_types =
       m.types
-      |> Enum.reject(&Map.has_key?(doc.types, &1.name))
+      |> Enum.reject(&Map.has_key?(doc.types, Map.get(&1, :origin)))
       |> Enum.with_index()
       |> Enum.map(fn {t, i} -> q(Dmn.item_xml(t, "_t-new#{i}-#{:erlang.phash2(t.name)}"), pre) end)
 
@@ -322,7 +368,10 @@ defmodule DmnSpike.Dmn.Overlay do
               if(n = m.nodes[id], do: [node_el(m, doc, n, pre)], else: [])
 
             {:type, name} ->
-              if(t = Enum.find(m.types, &(&1.name == name)), do: [type_el(doc.types[name], t, pre)], else: [])
+              if(t = Enum.find(m.types, &(Map.get(&1, :origin) == name)),
+                do: [type_el(doc.types[name], t, pre)],
+                else: []
+              )
 
             :dmndi ->
               [:dmndi]
@@ -434,9 +483,10 @@ defmodule DmnSpike.Dmn.Overlay do
 
     variable =
       case named.("variable") do
-        [{vt, va, _} | _] ->
+        [{vt, va, vk} | _] ->
           va = va |> Enum.reject(&match?({"typeRef", _}, &1)) |> put_attrs([{"name", node.name}])
-          [{:el, vt, if(node.type_ref, do: va ++ [{"typeRef", node.type_ref}], else: va), []}]
+          # the variable's own description and extensions stay
+          [{:el, vt, if(node.type_ref, do: va ++ [{"typeRef", node.type_ref}], else: va), kept_children(vk)}]
 
         [] ->
           fresh.("variable")
@@ -456,7 +506,19 @@ defmodule DmnSpike.Dmn.Overlay do
               do: from_simple(r)
 
         true ->
-          fresh.("literalExpression") ++ fresh.("context") ++ fresh.("decisionTable") ++ fresh.("encapsulatedLogic")
+          raw_expr =
+            Enum.filter(raw, &(Dmn.local(elem(&1, 0)) in @expr_tags or Dmn.local(elem(&1, 0)) == "encapsulatedLogic"))
+
+          fresh_expr =
+            fresh.("literalExpression") ++ fresh.("context") ++ fresh.("decisionTable") ++ fresh.("encapsulatedLogic")
+
+          # the model decides the text and the structure; the original keeps its ids, typeRefs and unknown children
+          for f <- fresh_expr do
+            case Enum.find(raw_expr, &(Dmn.local(elem(&1, 0)) == Dmn.local(elem(f, 1)))) do
+              nil -> f
+              r -> merge(f, r)
+            end
+          end
       end
 
     extension =
@@ -490,6 +552,44 @@ defmodule DmnSpike.Dmn.Overlay do
     {:el, tag, attrs, sort_children(extension ++ description ++ variable ++ reqs ++ expression ++ others, kind)}
   end
 
+  # attributes the model owns: when the regenerated element has none, the original's is gone on purpose
+  @owned ~w(name hitPolicy)
+
+  # Merges a regenerated element into the original it replaces, by tag and position. Only where the number
+  # of children with a tag is unchanged (a deleted column or rule would shift the positions and attach
+  # another one's ids and typeRef), otherwise the regenerated children are used as they are.
+  defp merge({:el, tag, fattrs, fkids}, {_, rattrs, rkids}) do
+    kept = Enum.reject(rattrs, fn {k, _} -> Dmn.local(k) in @owned and not List.keymember?(fattrs, k, 0) end)
+    attrs = Enum.reduce(fattrs, kept, &put_attrs(&2, [&1]))
+    {:el, tag, attrs, merge_children(fkids, for(k <- rkids, is_tuple(k), do: k))}
+  end
+
+  defp merge_children(fkids, rkids) do
+    if Enum.all?(fkids, &is_binary/1), do: fkids, else: merge_elements(fkids, rkids)
+  end
+
+  defp merge_elements(fkids, rkids) do
+    # regenerated elements are {:el, tag, attrs, kids}, the original's are Saxy's {tag, attrs, kids}
+    fresh_by = Enum.group_by(fkids, &Dmn.local(elem(&1, 1)))
+    raw_by = Enum.group_by(rkids, &Dmn.local(elem(&1, 0)))
+    # unmodelled children of the original (description, extensionElements, ...) come first, as in the schema
+    unknown = for r <- rkids, not Map.has_key?(fresh_by, Dmn.local(elem(r, 0))), do: from_simple(r)
+
+    {merged, _} =
+      Enum.map_reduce(fkids, %{}, fn {:el, t, _, _} = f, seen ->
+        name = Dmn.local(t)
+        i = Map.get(seen, name, 0)
+        raws = Map.get(raw_by, name, [])
+
+        same_count? = length(raws) == length(Map.fetch!(fresh_by, name))
+        merged = if same_count? and Enum.at(raws, i), do: merge(f, Enum.at(raws, i)), else: f
+
+        {merged, Map.put(seen, name, i + 1)}
+      end)
+
+    unknown ++ merged
+  end
+
   # the value of an input data node lives in our own extension element; other extension content is kept
   defp input_extension(node, existing, pre) do
     ours = if node.expr.result == "", do: [], else: [q({:el, "spike:value", [], [node.expr.result]}, pre)]
@@ -501,7 +601,7 @@ defmodule DmnSpike.Dmn.Overlay do
       [{t, a, k} | _] ->
         kept =
           for c <- Enum.filter(k, &is_tuple/1),
-              Dmn.local(elem(c, 0)) != "value" or not String.contains?(elem(c, 0), "spike"),
+              elem(c, 0) != pre.spike <> "value",
               do: from_simple(c)
 
         content = kept ++ ours

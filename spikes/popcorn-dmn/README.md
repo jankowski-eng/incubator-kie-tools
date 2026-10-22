@@ -36,7 +36,7 @@ The model covers only part of DMN, so saving must not damage the rest. `Dmn.Over
 - an **unedited** file is written back as the same document (checked on the real KIE `Sample.dmn` and a second fixture: identical after canonicalisation, licence header included);
 - an **edited** element is regenerated but keeps its own attributes, ids, `dmn:`-style prefixes and every child the editor does not model, in DMN's child order; elements nothing touched stay byte-for-byte as they were;
 - the **diagram** is rebuilt around the original shapes and edges, so styles and labels survive; only bounds and waypoints that changed are rewritten, and entries pointing at deleted elements (e.g. KIE's column widths) are removed;
-- text annotations, associations, knowledge sources, authority requirements and groups are edited like any other element (untouched ones are written back as they were); decision services and extension elements are **kept untouched** even though the editor does not show them; expression kinds it cannot edit (relation, function, list, ...) are shown read-only and kept;
+- text annotations, associations, knowledge sources, authority requirements and groups are edited like any other element (untouched ones are written back as they were); decision services and extension elements are **kept untouched** even though the editor does not show them; expression kinds it cannot edit (relation, function, list, aggregated COLLECT tables, ...) are shown read-only and kept; editing an expression merges the new text into the original element, so ids, typeRefs and unknown children stay (as long as the number of columns or rules is unchanged);
 - an `<invocation>` is converted to a FEEL call so it evaluates, but written back as the original `<invocation>` until the expression is edited.
 
 Known limits: comments inside the document (only those before the root are kept), a DOCTYPE, formatting and attribute whitespace are normalised; editing a data type regenerates its components (their ids are not kept); and values typed into _input data_ nodes (test data) are stored in a `spike:value` extension element, which a real product should keep out of the file.
@@ -47,7 +47,7 @@ Where the editor can and cannot run (iframes, popups, VS Code) is measured in [E
 
 ## Verification
 
-`mix test` covers the pure logic (83 tests, including the real KIE sample and the open-and-save guarantees). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, workspace layout and on-canvas actions, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
+`mix test` covers the pure logic (105 tests, including the real KIE sample and the open-and-save guarantees). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, workspace layout and on-canvas actions, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
 
 Notes from building this:
 

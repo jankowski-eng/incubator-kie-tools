@@ -13,8 +13,10 @@ defmodule DmnSpike.Editor do
 
   @patch_js """
   ({ops}) => {
+    // element ids may contain dots (valid in DMN), which a CSS `#id` selector would read as a class
+    const find = (sel) => (/^#[^ >[:,+~]+$/.test(sel) ? document.getElementById(sel.slice(1)) : document.querySelector(sel));
     for (const [k, sel, a, b] of ops) {
-      const el = document.querySelector(sel);
+      const el = find(sel);
       if (!el) continue;
       if (k === 'html') el.innerHTML = a;
       else if (k === 'outer') el.outerHTML = a;

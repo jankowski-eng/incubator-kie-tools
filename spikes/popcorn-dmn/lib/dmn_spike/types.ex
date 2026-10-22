@@ -78,8 +78,19 @@ defmodule DmnSpike.Types do
 
   defp check(_m, nil, _t, _seen), do: []
 
-  defp check(m, value, %{collection: true} = t, seen) when is_list(value),
-    do: value |> Enum.flat_map(&check(m, &1, %{t | collection: false}, seen))
+  # An expression constraint on a list constrains the whole list (as `typeConstraint` does in KIE's editor);
+  # an enumeration or range is checked against every item.
+  defp check(m, value, %{collection: true} = t, seen) when is_list(value) do
+    {item, whole} =
+      if match?(%{kind: :expression}, t.constraint),
+        do: {%{t | collection: false, constraint: nil}, t.constraint},
+        else: {%{t | collection: false}, nil}
+
+    case Enum.flat_map(value, &check(m, &1, item, seen)) do
+      [] -> check_constraint(whole, value)
+      errors -> errors
+    end
+  end
 
   defp check(_m, _value, %{collection: true}, _seen), do: ["expected a list"]
 

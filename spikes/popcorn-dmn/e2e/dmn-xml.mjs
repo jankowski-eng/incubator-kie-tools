@@ -207,6 +207,21 @@ ok(
   (await count("[onmouseover]")) === 0 && (await count("#scene g[data-id]")) === 8
 );
 
+// element ids with dots are valid DMN ids and must still get incremental updates (a CSS #id selector would not)
+const dotted = `<definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="x" id="d"><decision id="dec.1" name="Dotted"><variable id="v.1" name="Dotted"/><literalExpression><text>1 + 1</text></literalExpression></decision></definitions>`;
+await page.locator("#file").setInputFiles({ name: "dots.dmn", mimeType: "text/xml", buffer: Buffer.from(dotted) });
+await settle(900);
+await page.locator('#scene g[data-id="dec.1"] .shape').click();
+await settle(400);
+ok("a dotted id shows its value", (await page.locator('[id="nv-dec.1"]').textContent()) === "2");
+await page.locator('textarea[data-cell="dec.1:0"]').fill("40 + 2");
+await settle(600);
+ok(
+  "and is updated when the expression changes",
+  (await page.locator('[id="nv-dec.1"]').textContent()) === "42",
+  await page.locator('[id="nv-dec.1"]').textContent()
+);
+
 console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);
 console.log(logs.filter((l) => !l.startsWith("[log] popcorn")).join("\n"));
 await browser.close();
