@@ -47,6 +47,8 @@ defmodule DmnSpike.Dmn.Overlay do
           name == "itemDefinition" and Dmn.attr(a, "name") -> {{:type, Dmn.attr(a, "name")}, seen}
           name == "DMNDI" -> {:dmndi, seen}
           key && not MapSet.member?(seen, key) -> {{:link, key}, MapSet.put(seen, key)}
+          # a second association between the same two elements: it goes when the link goes
+          key -> {{:duplicate, key, c}, seen}
           true -> {{:raw, c}, seen}
         end
       end)
@@ -326,6 +328,9 @@ defmodule DmnSpike.Dmn.Overlay do
 
             {:link, key} ->
               if key in m.links, do: [from_simple(doc.links[key].raw)], else: []
+
+            {:duplicate, key, c} ->
+              if key in m.links, do: [from_simple(c)], else: []
 
             {:raw, c} ->
               [from_simple(c)]

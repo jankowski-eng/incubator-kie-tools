@@ -203,6 +203,28 @@ defmodule DmnSpikeTest do
     end
   end
 
+  describe "auto layout and artifacts" do
+    test "annotations and sources follow the element they are linked to, groups and loose ones stay" do
+      m = Model.sample()
+      {:ok, m, note} = Model.add_required(m, "front", "annotation")
+      {:ok, m, src} = Model.add_required(m, "loan", "source")
+      {m, loose} = Model.add_node(m, "annotation", 700, 700)
+      {m, group} = Model.add_node(m, "group", 300, 300)
+      # shake the decision nodes so that layout has to move them
+      m = Model.move(m, "front", 5, 5)
+      before = m.nodes
+
+      laid = Layout.run(m)
+      shift = fn id -> {laid.nodes[id].x - before[id].x, laid.nodes[id].y - before[id].y} end
+
+      assert shift.("front") != {0, 0}, "the layout did move the node"
+      assert shift.(note) == shift.("front")
+      assert shift.(src) == shift.("loan")
+      assert shift.(loose) == {0, 0}
+      assert shift.(group) == {0, 0}
+    end
+  end
+
   describe "decision tables" do
     defp table_model(policy, rules) do
       m = Model.sample()
@@ -668,6 +690,25 @@ defmodule DmnSpikeTest do
       refute gone =~ "textAnnotation"
       refute gone =~ "<association"
       refute gone =~ "_note"
+    end
+
+    test "a second association between the same two elements goes when the link goes" do
+      xml = """
+      <definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="d" id="d1">
+        <inputData id="i" name="In"><variable id="i-v" name="In"/></inputData>
+        <textAnnotation id="t"><text>x</text></textAnnotation>
+        <association id="a1"><sourceRef href="#t"/><targetRef href="#i"/></association>
+        <association id="a2"><sourceRef href="#i"/><targetRef href="#t"/></association>
+      </definitions>
+      """
+
+      {:ok, m, _} = Dmn.from_xml(xml)
+      assert m.links == [{"t", "i", :association}]
+      out = Dmn.to_xml(m)
+      assert out =~ ~s|<association id="a1">| and out =~ ~s|<association id="a2">|, "untouched, both stay"
+
+      gone = m |> Model.delete_edge(length(m.edges)) |> Dmn.to_xml()
+      refute gone =~ "<association"
     end
 
     test "an association to an element that does not exist stays in the file" do

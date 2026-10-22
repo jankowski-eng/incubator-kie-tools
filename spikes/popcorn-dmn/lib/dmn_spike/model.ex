@@ -371,26 +371,21 @@ defmodule DmnSpike.Model do
   def description(n), do: Map.get(n, :description) || ""
   def set_description(%__MODULE__{} = m, id, text), do: put_in(m.nodes[id].description, text)
 
-  @doc "The nodes `id` requires and the nodes that require `id`, as `{id, name}` lists."
-  def neighbours(%__MODULE__{} = m, id) do
-    pick = fn pairs -> for {other, kind} <- pairs, n = m.nodes[other], do: {n.id, n.name, kind} end
-    {pick.(for({f, t, k} <- m.edges, t == id, do: {f, k})), pick.(for({f, t, k} <- m.edges, f == id, do: {t, k}))}
-  end
+  # `{id, name, kind}` of what points at `id`, and of what `id` points at, along `edges`
+  defp incoming(m, id, edges), do: for({f, ^id, k} <- edges, n = m.nodes[f], do: {n.id, n.name, k})
+  defp outgoing(m, id, edges), do: for({^id, t, k} <- edges, n = m.nodes[t], do: {n.id, n.name, k})
 
-  @doc "Sources `id` takes its authority from, and what takes its authority from `id`, as `{id, name, :authority}`."
+  @doc "The nodes `id` requires and the nodes that require `id`, as `{id, name, kind}` lists."
+  def neighbours(%__MODULE__{} = m, id), do: {incoming(m, id, m.edges), outgoing(m, id, m.edges)}
+
+  @doc "What `id` takes its authority from, and what takes its authority from `id`, as `{id, name, :authority}`."
   def authorities(%__MODULE__{} = m, id) do
-    pick = fn pairs -> for other <- pairs, n = m.nodes[other], do: {n.id, n.name, :authority} end
-    {pick.(for({f, ^id, :authority} <- m.links, do: f)), pick.(for({^id, t, :authority} <- m.links, do: t))}
+    authority = Enum.filter(m.links, &(elem(&1, 2) == :authority))
+    {incoming(m, id, authority), outgoing(m, id, authority)}
   end
 
   @doc "Everything joined to `id` by a link (association, authority requirement), as `{id, name, kind}`."
-  def links_of(%__MODULE__{} = m, id) do
-    for {a, b, kind} <- m.links,
-        id in [a, b],
-        other = if(a == id, do: b, else: a),
-        n = m.nodes[other],
-        do: {n.id, n.name, kind}
-  end
+  def links_of(%__MODULE__{} = m, id), do: incoming(m, id, m.links) ++ outgoing(m, id, m.links)
 
   @doc "DMN requirement rules: input/decision -> decision (information), bkm -> decision/bkm (knowledge)."
   def connect(%__MODULE__{} = m, from, to) do

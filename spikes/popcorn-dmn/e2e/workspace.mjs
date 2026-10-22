@@ -237,6 +237,19 @@ await page.dragAndDrop('#palette [data-kind="group"]', "#drd", { targetPosition:
 await settle(700);
 ok("a group can be dragged in from the palette", (await count("#scene g.group")) === 1);
 const gid = await page.locator("#scene g.group").getAttribute("data-id");
+// a click on the resize handle without dragging is not an undo step
+await page.dragAndDrop('#palette [data-kind="group"]', "#drd", { targetPosition: { x: 200, y: 100 } });
+await settle(600);
+ok("a second group is added", (await count("#scene g.group")) === 2);
+const rzTmp = await page.locator("#scene g.group.sel .resize").boundingBox();
+await page.mouse.click(rzTmp.x + rzTmp.width / 2, rzTmp.y + rzTmp.height / 2);
+await settle(300);
+await page.locator("[data-click=undo]").click();
+await settle(500);
+ok("a click on the handle adds no undo step (one undo removes the group)", (await count("#scene g.group")) === 1);
+await page.locator(`#scene g.group .band`).click({ position: { x: 40, y: 12 } });
+await settle(300);
+
 ok(
   "it is drawn behind everything else",
   (await page.locator("#scene g[data-id]").first().getAttribute("data-id")) === gid

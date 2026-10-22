@@ -251,15 +251,18 @@ defmodule DmnSpike.Editor do
     %{state | drag: nil, resize: nil}
   end
 
-  defp event(%{"t" => "rstart", "id" => id}, state), do: %{push_history(state, nil) | resize: id}
+  # history is recorded on the first move, so a click on the handle is not an undo step
+  defp event(%{"t" => "rstart", "id" => id}, state), do: %{state | resize: {id, false}}
 
-  defp event(%{"t" => "rmove", "x" => x, "y" => y}, %{resize: id} = state) when id != nil do
+  defp event(%{"t" => "rmove", "x" => x, "y" => y}, %{resize: {id, started?}} = state) do
+    state = if started?, do: state, else: push_history(state, nil)
     model = Model.resize(state.model, id, x, y)
-    n = model.nodes[id]
-    results = Eval.run(model)
+    # artifacts have no value, so nothing needs evaluating while the size changes
+    patch(
+      [["outer", ~s|[data-id="#{id}"]|, Svg.node_html(model.nodes[id], nil, state.selected)]] ++ edge_ops(model, id)
+    )
 
-    patch([["outer", ~s|[data-id="#{id}"]|, Svg.node_html(n, results[id], state.selected)]] ++ edge_ops(model, id))
-    %{state | model: model}
+    %{state | model: model, resize: {id, true}}
   end
 
   defp event(%{"t" => "pan", "dx" => dx, "dy" => dy}, state), do: set_view(state, View.pan(current_view(state), dx, dy))

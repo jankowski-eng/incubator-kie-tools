@@ -89,7 +89,7 @@ defmodule DmnSpike.Svg do
     do:
       "node" <>
         if(selected?, do: " sel", else: "") <>
-        if(invalid?, do: " invalid", else: "") <> if(type in [:annotation, :source, :group], do: " #{type}", else: "")
+        if(invalid?, do: " invalid", else: "") <> if(Model.artifact?(%{type: type}), do: " #{type}", else: "")
 
   def node_value_text(nil), do: ""
   def node_value_text(%{value: nil}), do: "—"
@@ -105,7 +105,7 @@ defmodule DmnSpike.Svg do
       ~s|<g class="#{node_class(n.id == selected, false, n.type)}" data-id="#{n.id}" transform="#{transform(n)}">|,
       shape(n),
       ~s|<text id="nm-#{n.id}" class="gname" x="12" y="19" font-size="12.5">#{Fmt.esc(n.name)}</text>|,
-      ~s|<g class="resize" data-resize="#{n.id}" transform="translate(#{n.w} #{n.h})"><title>Resize</title><rect x="-14" y="-14" width="14" height="14"/><path d="M-10 -2L-2 -10M-6 -2L-2 -6"/></g>|,
+      resize_handle(n),
       del(n),
       ~s|<g id="info-#{n.id}"></g>|,
       ~s|<g id="pad-#{n.id}"></g>|,
@@ -119,7 +119,7 @@ defmodule DmnSpike.Svg do
       shape(n),
       ~s|<foreignObject x="10" y="4" width="#{max(n.w - 14, 10)}" height="#{max(n.h - 8, 10)}"><div class="atext" id="nm-#{n.id}">#{Fmt.esc(n.name)}</div></foreignObject>|,
       handle(n),
-      ~s|<g class="resize" data-resize="#{n.id}" transform="translate(#{n.w} #{n.h})"><title>Resize</title><rect x="-14" y="-14" width="14" height="14"/><path d="M-10 -2L-2 -10M-6 -2L-2 -6"/></g>|,
+      resize_handle(n),
       del(n),
       ~s|<g id="info-#{n.id}"></g>|,
       ~s|<g id="pad-#{n.id}">#{if n.id == selected, do: pad(n)}</g>|,
@@ -147,6 +147,10 @@ defmodule DmnSpike.Svg do
   defp handle(n),
     do:
       ~s|<g class="handle" data-handle="#{n.id}" transform="translate(#{div(n.w, 2)} 0)"><title>Drag onto a node that needs this one</title><circle r="10"/><path d="M0 4V-4M-3.5 -1L0 -4.5L3.5 -1"/></g>|
+
+  defp resize_handle(n),
+    do:
+      ~s|<g class="resize" data-resize="#{n.id}" transform="translate(#{n.w} #{n.h})"><title>Resize</title><rect x="-14" y="-14" width="14" height="14"/><path d="M-10 -2L-2 -10M-6 -2L-2 -6"/></g>|
 
   defp del(n),
     do:
