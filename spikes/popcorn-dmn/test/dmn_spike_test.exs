@@ -918,6 +918,124 @@ defmodule DmnSpikeTest do
     end
   end
 
+  describe "review fixes (types, tables, names, XML order)" do
+    alias DmnSpike.{Dmn, Editor, Svg}
+
+    test "a type that became a scalar does not keep exporting its old components" do
+      m = Model.sample()
+      app = Enum.find_index(m.types, &(&1.name == "tApplicant"))
+      assert Enum.at(m.types, app).components != []
+      m = %{m | types: List.update_at(m.types, app, &%{&1 | ref: "string"})}
+      xml = Dmn.to_xml(m)
+      {:ok, m2, _} = Dmn.from_xml(xml)
+      t = Enum.at(m2.types, app)
+      assert t.ref == "string" and t.components == [], "still a string after a round trip"
+
+      assert xml =~
+               ~r/<itemDefinition id="_t#{app}" name="tApplicant">\s*<typeRef>string<\/typeRef>\s*<\/itemDefinition>/
+    end
+
+    test "children are written in schema order: description before extensionElements, the input's value before its variable" do
+      m = Model.set_description(Model.sample(), "app", "Who applies")
+      m = Model.set_text(m, "app", 0, "{Income: 1}")
+      xml = Dmn.to_xml(m)
+
+      assert xml =~
+               ~r/<description>Who applies<\/description>\s*<extensionElements>.*<\/extensionElements>\s*<variable/s
+
+      xml = """
+      <definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="d" id="d1">
+        <knowledgeSource id="k" name="K">
+          <description>D</description>
+          <extensionElements/>
+          <authorityRequirement id="r"><requiredAuthority href="#k"/></authorityRequirement>
+          <type>Law</type>
+          <owner href="#x"/>
+        </knowledgeSource>
+        <decision id="d" name="D">
+          <description>x</description>
+          <extensionElements/>
+          <variable id="v" name="D"/>
+          <literalExpression><text>1</text></literalExpression>
+        </decision>
+      </definitions>
+      """
+
+      {:ok, m, _} = Dmn.from_xml(xml)
+      out = m |> Model.rename("k", "K2") |> Model.rename("d", "D2") |> Dmn.to_xml()
+
+      assert out =~
+               ~r/<description>D<\/description>\s*<extensionElements\/>\s*<authorityRequirement.*<type>Law<\/type>\s*<owner/s
+
+      assert out =~ ~r/<description>x<\/description>\s*<extensionElements\/>\s*<variable/
+    end
+
+    test "names are found however many exist" do
+      m = Enum.reduce(1..120, %Model{}, fn _, acc -> acc |> Model.add_node("decision", 0, 0) |> elem(0) end)
+      names = m.nodes |> Map.values() |> Enum.map(& &1.name)
+      assert length(Enum.uniq(names)) == 120
+    end
+
+    test "named output headers have a table path the editor understands" do
+      assert Editor.table_path("n-0") == ["n", 0]
+      assert Editor.table_path("e-1-2") == ["e", 1, 2]
+      assert Editor.table_path("h-0") == ["h", 0]
+      m = Model.sample()
+      m = Model.set_table_text(m, "risk", Editor.table_path("n-0"), "Category")
+      assert hd(m.nodes["risk"].expr.outputs).name == "Category"
+    end
+
+    test "value badges are escaped as HTML" do
+      html = Svg.node_value_html(%{value: "<svg/onload=a=1>"})
+      refute html =~ "<"
+      assert html =~ "&lt;svg"
+    end
+
+    test "only a decision can become a decision table" do
+      m = Model.sample()
+      assert Model.set_expr_kind(m, "dti", :table) == m
+      assert Model.set_expr_kind(m, "app", :table) == m
+      assert Model.kind(Model.set_expr_kind(m, "front", :table).nodes["front"]) == :table
+    end
+
+    test "COLLECT and RULE ORDER with no matching rule give an empty list, other policies null" do
+      {m, id} = Model.add_node(Model.sample(), "decision", 0, 0)
+      m = Model.set_expr_kind(m, id, :table)
+      m = Model.set_table_text(m, id, ["h", 0], "1")
+      m = Model.set_table_text(m, id, ["e", 0, 0], "< 0")
+      m = Model.set_table_text(m, id, ["o", 0, 0], ~s|"x"|)
+
+      for {policy, expected} <- [{"COLLECT", []}, {"RULE ORDER", []}, {"UNIQUE", nil}, {"FIRST", nil}, {"ANY", nil}] do
+        r = m |> Model.set_hit_policy(id, policy) |> Eval.run() |> Map.fetch!(id)
+        assert r.value == expected, policy
+      end
+    end
+
+    test "date, time and duration types accept only their own values" do
+      {:ok, dt, _} = Feel.eval(~s|date and time("2020-01-01T10:00:00")|, %{}, sandbox: false)
+      {:ok, time, _} = Feel.eval(~s|time("10:00:00")|, %{}, sandbox: false)
+      {:ok, days, _} = Feel.eval(~s|duration("P1DT2H")|, %{}, sandbox: false)
+      {:ok, months, _} = Feel.eval(~s|duration("P1Y2M")|, %{}, sandbox: false)
+      {:ok, date, _} = Feel.eval(~s|date("2020-01-01")|, %{}, sandbox: false)
+      m = Model.sample()
+
+      for {type, good} <- [
+            {"date and time", dt},
+            {"time", time},
+            {"days and time duration", days},
+            {"years and months duration", months},
+            {"date", date}
+          ] do
+        assert Types.validate(m, good, type) == [], type
+        assert Types.validate(m, "not a value", type) != [], type
+      end
+
+      assert Types.validate(m, days, "years and months duration") != []
+      assert Types.validate(m, dt, "date") != []
+      assert Types.validate(m, date, "context") != [], "a date is not a context"
+    end
+  end
+
   describe "descriptions" do
     alias DmnSpike.Dmn
 

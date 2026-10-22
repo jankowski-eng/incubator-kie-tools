@@ -20,14 +20,15 @@ defmodule DmnSpike.Dmn.Overlay do
   @elements ~w(inputData decision businessKnowledgeModel textAnnotation knowledgeSource group)
   @expr_tags ~w(literalExpression context decisionTable invocation relation functionDefinition list conditional filter for some every)
 
-  # the order of children DMN's schema prescribes (unknown children go before the expression)
+  # the order of children DMN's schema prescribes (DMN16.xsd: tDMNElement is description, then
+  # extensionElements); unknown children go before the expression
   @rank %{
     decision:
-      ~w(extensionElements description question allowedAnswers variable informationRequirement knowledgeRequirement authorityRequirement supportedObjective impactedPerformanceIndicator decisionMaker decisionOwner usingProcess usingTask),
-    input: ~w(extensionElements description variable),
-    source: ~w(extensionElements description type owner locationURI authorityRequirement),
-    bkm: ~w(extensionElements description variable encapsulatedLogic knowledgeRequirement authorityRequirement),
-    item: ~w(extensionElements description typeRef itemComponent allowedValues typeConstraint functionItem)
+      ~w(description extensionElements question allowedAnswers variable informationRequirement knowledgeRequirement authorityRequirement supportedObjective impactedPerformanceIndicator decisionMaker decisionOwner usingProcess usingTask),
+    input: ~w(description extensionElements variable),
+    source: ~w(description extensionElements authorityRequirement type owner locationURI),
+    bkm: ~w(description extensionElements variable encapsulatedLogic knowledgeRequirement authorityRequirement),
+    item: ~w(description extensionElements typeRef allowedValues typeConstraint itemComponent functionItem)
   }
 
   # ===================================================================== import side

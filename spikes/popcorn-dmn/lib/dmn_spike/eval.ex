@@ -102,6 +102,8 @@ defmodule DmnSpike.Eval do
   defp rule_value(_names, [value]), do: value
   defp rule_value(names, values), do: names |> Enum.zip(values) |> Map.new()
 
+  # a list-valued policy with no match is an empty list, not null
+  defp hit(p, []) when p in ["COLLECT", "RULE ORDER"], do: {[], "no rule matches"}
   defp hit(_, []), do: {nil, "no rule matches"}
   defp hit("UNIQUE", [{_, v}]), do: {v, nil}
   defp hit("UNIQUE", m), do: {nil, "#{length(m)} rules match, UNIQUE allows one"}

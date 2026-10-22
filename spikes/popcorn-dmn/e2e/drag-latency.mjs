@@ -16,7 +16,11 @@ if (file !== "sample") {
     timeout: 200000,
   });
 }
-const id = await page.locator("#scene g[data-id]").nth(20).getAttribute("data-id");
+// a large imported file has more than 20 nodes; the default sample has 8
+const id = await page
+  .locator("#scene g[data-id]")
+  .nth(file === "sample" ? 3 : 20)
+  .getAttribute("data-id");
 const node = page.locator(`#scene [data-id="${id}"]`);
 const tr = () => node.getAttribute("transform");
 const b = await node.locator(".shape").boundingBox();

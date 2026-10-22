@@ -231,7 +231,7 @@ defmodule DmnSpike.Panel do
           ~s|<label>parameters <input class="params" data-op="nparams" data-id="#{node.id}" value="#{Fmt.esc(Enum.join(Model.params(node), ", "))}" placeholder="none" spellcheck="false"/></label>|,
         else: ""
       ),
-      ~s|<label>expression <select data-op="nexpr" data-id="#{node.id}"><option value="context"#{if Model.kind(node) == :context, do: " selected"}>literal / context</option><option value="table"#{if Model.kind(node) == :table, do: " selected"}>decision table</option>#{if Model.kind(node) == :raw, do: ~s|<option value="raw" selected disabled>#{Fmt.esc(node.expr.tag)} (kept, read-only)</option>|}</select></label>|,
+      ~s|<label>expression <select data-op="nexpr" data-id="#{node.id}"><option value="context"#{if Model.kind(node) == :context, do: " selected"}>literal / context</option>#{if node.type == :decision, do: ~s|<option value="table"#{if Model.kind(node) == :table, do: " selected"}>decision table</option>|}#{if Model.kind(node) == :raw, do: ~s|<option value="raw" selected disabled>#{Fmt.esc(node.expr.tag)} (kept, read-only)</option>|}</select></label>|,
       ~s|<span class="errs" id="nerr-#{node.id}">#{errors_html(result)}</span></div>|
     ]
     |> IO.iodata_to_binary()

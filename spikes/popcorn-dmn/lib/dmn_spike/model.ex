@@ -136,7 +136,10 @@ defmodule DmnSpike.Model do
       rules: [%{entries: ["-"], outs: [""], note: ""}]
     }
 
-  def set_expr_kind(%__MODULE__{} = m, id, :table), do: put_in(m.nodes[id].expr, new_table())
+  # only a decision can be a decision table; for an input or a business knowledge model this is a no-op
+  def set_expr_kind(%__MODULE__{} = m, id, :table) do
+    if m.nodes[id].type == :decision, do: put_in(m.nodes[id].expr, new_table()), else: m
+  end
 
   def set_expr_kind(%__MODULE__{} = m, id, :context),
     do: put_in(m.nodes[id].expr, with_params(m.nodes[id], %{rows: [], result: ""}, params(m.nodes[id])))
@@ -284,7 +287,11 @@ defmodule DmnSpike.Model do
     id = "n#{n}"
     names = MapSet.new(Map.values(m.nodes), & &1.name)
     base = "New #{label}"
-    name = Enum.find([base | Enum.map(2..99, &"#{base} #{&1}")], &(not MapSet.member?(names, &1)))
+
+    name =
+      [base]
+      |> Stream.concat(Stream.map(Stream.iterate(2, &(&1 + 1)), &"#{base} #{&1}"))
+      |> Enum.find(&(not MapSet.member?(names, &1)))
 
     {w, h} = Map.get(@sizes, type, {150, 60})
 

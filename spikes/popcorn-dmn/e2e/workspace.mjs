@@ -334,6 +334,32 @@ for (let i = 0; i < 4; i++) {
 }
 ok("undo removes the group again", (await count("#scene g.group")) === 0);
 
+// a FEEL string is shown as text in the value badge, never as markup
+await page.locator('#scene g[data-id="front"] .shape').click();
+await settle(400);
+await page.locator('[data-click="dock:expr"]').click();
+await settle(300);
+await page.locator('textarea[data-cell="front:4"]').fill('"<i onclick=1>x</i>"');
+await settle(600);
+ok(
+  "a string with markup is displayed as text in the badge",
+  (await count("#nv-front *")) === 0 && (await text("#nv-front")).includes("<i onclick"),
+  await text("#nv-front")
+);
+await page.locator("[data-click=undo]").click();
+await settle(500);
+
+// only decisions offer a decision table
+await page.locator('#scene g[data-id="dti"] .shape').click();
+await settle(400);
+ok(
+  "a business knowledge model has no decision table option",
+  (await count("select[data-op=nexpr] option[value=table]")) === 0
+);
+await page.locator('#scene g[data-id="front"] .shape').click();
+await settle(400);
+ok("a decision has it", (await count("select[data-op=nexpr] option[value=table]")) === 1);
+
 // type pill
 await page.locator('#scene g[data-id="front"] .shape').click();
 await settle();

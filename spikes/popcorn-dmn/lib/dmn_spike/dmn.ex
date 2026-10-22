@@ -71,10 +71,16 @@ defmodule DmnSpike.Dmn do
   def item_xml(t, id) do
     attrs = [{"id", id}, {"name", t.name}] ++ if(t.collection, do: [{"isCollection", "true"}], else: [])
 
+    # DMN allows either a typeRef or components, never both: components left over from when this was a
+    # structure would turn it back into one on the next import
+    components =
+      if t.ref,
+        do: [],
+        else:
+          Enum.map(Enum.with_index(t.components), fn {c, i} -> item_xml(c, "#{id}-#{i}") |> rename("itemComponent") end)
+
     kids =
-      if(t.ref, do: [el("typeRef", [], [t.ref])], else: []) ++
-        constraint_xml(t.constraint, t.collection) ++
-        Enum.map(Enum.with_index(t.components), fn {c, i} -> item_xml(c, "#{id}-#{i}") |> rename("itemComponent") end)
+      if(t.ref, do: [el("typeRef", [], [t.ref])], else: []) ++ constraint_xml(t.constraint, t.collection) ++ components
 
     el("itemDefinition", attrs, kids)
   end
@@ -134,7 +140,9 @@ defmodule DmnSpike.Dmn do
       end
 
     desc = if Model.description(n) == "", do: [], else: [el("description", [], [n.description])]
-    el(tag, [{"id", n.id}, {"name", n.name}], desc ++ [var] ++ info ++ know ++ authority_xml(m, n) ++ body)
+    # the schema puts extensionElements (the value of an input) before the variable
+    {ext, body} = if n.type == :input, do: {body, []}, else: {[], body}
+    el(tag, [{"id", n.id}, {"name", n.name}], desc ++ ext ++ [var] ++ info ++ know ++ authority_xml(m, n) ++ body)
   end
 
   @doc false

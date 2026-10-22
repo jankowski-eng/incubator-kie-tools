@@ -95,6 +95,9 @@ defmodule DmnSpike.Svg do
   def node_value_text(%{value: nil}), do: "—"
   def node_value_text(%{value: v}), do: Fmt.short(v)
 
+  @doc "The badge text as HTML: values come from FEEL strings, so they must be escaped wherever they are inserted."
+  def node_value_html(result), do: Fmt.esc(node_value_text(result))
+
   def node_title(nil), do: ""
   def node_title(%{value: v, errors: errors}), do: Fmt.esc(Enum.join(["value: " <> Fmt.value(v) | errors], "\n"))
 
@@ -135,7 +138,7 @@ defmodule DmnSpike.Svg do
       ~s|<title id="tt-#{n.id}">#{if Model.artifact?(n), do: "", else: node_title(result)}</title>|,
       shape(n),
       ~s|<text id="nm-#{n.id}" x="#{div(n.w, 2)}" y="#{if Model.artifact?(n), do: div(n.h, 2) - 4, else: 26}" text-anchor="middle" font-size="13" fill="currentColor">#{Fmt.esc(n.name)}</text>|,
-      ~s|<text id="nv-#{n.id}" class="nv" x="#{div(n.w, 2)}" y="45" text-anchor="middle" font-size="12">#{Fmt.esc(if Model.artifact?(n), do: "", else: node_value_text(result))}</text>|,
+      ~s|<text id="nv-#{n.id}" class="nv" x="#{div(n.w, 2)}" y="45" text-anchor="middle" font-size="12">#{if(Model.artifact?(n), do: "", else: node_value_html(result))}</text>|,
       handle(n),
       del(n),
       ~s|<g id="info-#{n.id}">#{info(n)}</g>|,

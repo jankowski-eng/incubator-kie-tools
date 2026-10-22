@@ -419,7 +419,7 @@ defmodule DmnSpike.Editor do
 
   defp event(%{"t" => "click", "what" => "add-type"}, state) do
     names = MapSet.new(state.model.types, & &1.name)
-    name = Enum.find(for(i <- 1..99, do: "tNewType#{i}"), &(not MapSet.member?(names, &1)))
+    name = Stream.iterate(1, &(&1 + 1)) |> Stream.map(&"tNewType#{&1}") |> Enum.find(&(not MapSet.member?(names, &1)))
     edit_types(%{state | type_sel: length(state.model.types)}, fn types -> types ++ [Types.new_type(name)] end)
   end
 
@@ -508,8 +508,7 @@ defmodule DmnSpike.Editor do
 
   defp event(%{"t" => "op", "op" => "dtcell", "id" => id, "path" => p, "value" => v}, state) do
     state = push_history(state, {:dt, id, p}, :merge)
-    path = p |> String.split("-") |> Enum.map(fn x -> if x in ["h", "e", "o"], do: x, else: String.to_integer(x) end)
-    state = %{state | model: Model.set_table_text(state.model, id, path, v)}
+    state = %{state | model: Model.set_table_text(state.model, id, table_path(p), v)}
     patch(refresh_ops(state))
     state
   end
@@ -600,6 +599,11 @@ defmodule DmnSpike.Editor do
   # --- helpers ---------------------------------------------------------------------------
 
   defp path(p), do: p |> String.split("-") |> Enum.map(&String.to_integer/1)
+
+  @doc false
+  # "h-0" (input header), "e-1-0" (entry), "o-1-0" (output), "n-0" (output name): a letter, then numbers
+  def table_path(p),
+    do: p |> String.split("-") |> Enum.map(fn x -> if x in ["h", "e", "o", "n"], do: x, else: String.to_integer(x) end)
 
   defp parse_cell(cell) do
     [id, idx] = String.split(cell, ":")
@@ -707,7 +711,7 @@ defmodule DmnSpike.Editor do
       for {nid, node} <- state.model.nodes, r = results[nid], reduce: [] do
         acc ->
           [
-            ["html", "#nv-#{nid}", if(Model.artifact?(node), do: "", else: Svg.node_value_text(r))],
+            ["html", "#nv-#{nid}", if(Model.artifact?(node), do: "", else: Svg.node_value_html(r))],
             ["html", "#tt-#{nid}", if(Model.artifact?(node), do: "", else: Svg.node_title(r))],
             ["attr", ~s|[data-id="#{nid}"]|, "class", Svg.node_class(nid == state.selected, r.errors != [], node.type)]
             | acc
