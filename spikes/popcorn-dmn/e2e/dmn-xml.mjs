@@ -110,7 +110,7 @@ ok(
     "textAnnotation",
     "association",
     "authorityRequirement",
-    "unsupported expression <invocation>",
+    "Fee: invocation to a FEEL function call",
   ].every((k) => report.includes(k)),
   report
 );
@@ -131,7 +131,7 @@ await settle(400);
 ok(
   "imported context (limit + result) renders",
   (await count("textarea[data-cell]")) === 2 &&
-    (await page.locator('textarea[data-cell="_loan_d:0"]').inputValue()) === "Lender Acceptable DTI + 5"
+    (await page.locator('textarea[data-cell="_loan_d:0"]').inputValue()) === "Lender Acceptable DTI() + 5"
 );
 await page.locator('#scene [data-id="_app"]').click();
 await settle(300);

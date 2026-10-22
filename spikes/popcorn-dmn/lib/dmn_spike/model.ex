@@ -22,7 +22,7 @@ defmodule DmnSpike.Model do
     nodes =
       [
         {"loan", :decision, "Loan Pre-Qualification", 330, 30, [],
-         ~s|if Front End Ratio <= Lender Acceptable PITI and Back End Ratio <= Lender Acceptable DTI then "Qualified" else "Not qualified"|},
+         ~s|if Front End Ratio <= Lender Acceptable PITI() and Back End Ratio <= Lender Acceptable DTI() then "Qualified" else "Not qualified"|},
         {"back", :decision, "Back End Ratio", 170, 140,
          [
            {"housing", "Front End Ratio * Applicant Data.Income / 100"},
@@ -46,6 +46,7 @@ defmodule DmnSpike.Model do
       ]
       |> Map.new(fn {id, type, name, x, y, rows, result} ->
         expr = %{rows: Enum.map(rows, fn {n, t} -> %{name: n, text: t} end), result: result}
+        expr = if type == :bkm, do: Map.put(expr, :params, []), else: expr
         node = %{id: id, type: type, name: name, x: x, y: y, w: 150, h: 60, expr: expr, type_ref: @type_refs[id]}
         {id, node}
       end)
@@ -72,10 +73,12 @@ defmodule DmnSpike.Model do
       kind: :table,
       hit_policy: "FIRST",
       inputs: [%{expr: "Front End Ratio"}, %{expr: "Back End Ratio"}],
+      outputs: [%{name: ""}],
+      note_title: nil,
       rules: [
-        %{entries: ["< 20", "< 30"], out: ~s|"Low"|},
-        %{entries: ["< 28", "-"], out: ~s|"Medium"|},
-        %{entries: ["-", "-"], out: ~s|"High"|}
+        %{entries: ["< 20", "< 30"], outs: [~s|"Low"|], note: ""},
+        %{entries: ["< 28", "-"], outs: [~s|"Medium"|], note: ""},
+        %{entries: ["-", "-"], outs: [~s|"High"|], note: ""}
       ]
     }
   end
@@ -88,12 +91,25 @@ defmodule DmnSpike.Model do
   def kind(%{expr: expr}), do: Map.get(expr, :kind, :context)
 
   def new_table,
-    do: %{kind: :table, hit_policy: "UNIQUE", inputs: [%{expr: ""}], rules: [%{entries: ["-"], out: ""}]}
+    do: %{kind: :table, hit_policy: "UNIQUE", inputs: [%{expr: ""}], outputs: [%{name: ""}], note_title: nil, rules: [%{entries: ["-"], outs: [""], note: ""}]}
 
   def set_expr_kind(%__MODULE__{} = m, id, :table), do: put_in(m.nodes[id].expr, new_table())
-  def set_expr_kind(%__MODULE__{} = m, id, :context), do: put_in(m.nodes[id].expr, %{rows: [], result: ""})
+  def set_expr_kind(%__MODULE__{} = m, id, :context),
+    do: put_in(m.nodes[id].expr, with_params(m.nodes[id], %{rows: [], result: ""}, params(m.nodes[id])))
 
-  def cell_count(%{expr: %{kind: :table, inputs: ins, rules: rules}}), do: length(ins) + length(rules) * (length(ins) + 1)
+  defp with_params(%{type: :bkm}, expr, params), do: Map.put(expr, :params, params)
+  defp with_params(_node, expr, _params), do: expr
+
+  @doc "Formal parameters of a business knowledge model (its function arguments)."
+  def params(%{expr: expr}), do: Map.get(expr, :params, [])
+
+  def set_params(%__MODULE__{} = m, id, text) do
+    names = text |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+    put_in(m.nodes[id].expr, Map.put(m.nodes[id].expr, :params, names))
+  end
+
+  def cell_count(%{expr: %{kind: :table, inputs: ins, outputs: outs, rules: rules}}),
+    do: length(ins) + length(rules) * (length(ins) + length(outs))
   def cell_count(node), do: length(cells(node))
 
   @doc "Cells of a context/literal node: `{label, text}`; the last has label `:result`. Tables have none."
@@ -110,25 +126,45 @@ defmodule DmnSpike.Model do
     end)
   end
 
-  # --- decision tables (paths: ["h", input], ["e", rule, input], ["o", rule]) ---------
+  # --- decision tables (paths: ["h", input], ["e", rule, input], ["o", rule, output], ["n", output]) ---
 
   def set_table_text(%__MODULE__{} = m, id, path, text) do
     update_in(m.nodes[id].expr, fn t ->
       case path do
         ["h", i] -> %{t | inputs: List.update_at(t.inputs, i, &%{&1 | expr: text})}
         ["e", r, i] -> %{t | rules: List.update_at(t.rules, r, fn rule -> %{rule | entries: List.replace_at(rule.entries, i, text)} end)}
-        ["o", r] -> %{t | rules: List.update_at(t.rules, r, &%{&1 | out: text})}
+        ["o", r, k] -> %{t | rules: List.update_at(t.rules, r, fn rule -> %{rule | outs: List.replace_at(rule.outs, k, text)} end)}
+        ["n", k] -> %{t | outputs: List.update_at(t.outputs, k, &%{&1 | name: text})}
       end
     end)
   end
 
+  def set_note(%__MODULE__{} = m, id, r, text),
+    do: update_in(m.nodes[id].expr, fn t -> %{t | rules: List.update_at(t.rules, r, &Map.put(&1, :note, text))} end)
+
   def set_hit_policy(%__MODULE__{} = m, id, hp) when hp in @hit_policies, do: put_in(m.nodes[id].expr.hit_policy, hp)
 
   def add_rule(%__MODULE__{} = m, id) do
-    update_in(m.nodes[id].expr, fn t -> %{t | rules: t.rules ++ [%{entries: Enum.map(t.inputs, fn _ -> "-" end), out: ""}]} end)
+    update_in(m.nodes[id].expr, fn t ->
+      %{t | rules: t.rules ++ [%{entries: Enum.map(t.inputs, fn _ -> "-" end), outs: Enum.map(t.outputs, fn _ -> "" end), note: ""}]}
+    end)
   end
 
   def del_rule(%__MODULE__{} = m, id, r), do: update_in(m.nodes[id].expr, fn t -> %{t | rules: List.delete_at(t.rules, r)} end)
+
+  def add_output(%__MODULE__{} = m, id) do
+    update_in(m.nodes[id].expr, fn t ->
+      %{t | outputs: t.outputs ++ [%{name: "output #{length(t.outputs) + 1}"}], rules: Enum.map(t.rules, &%{&1 | outs: &1.outs ++ [""]})}
+    end)
+  end
+
+  def del_output(%__MODULE__{} = m, id, k) do
+    update_in(m.nodes[id].expr, fn t ->
+      if length(t.outputs) <= 1,
+        do: t,
+        else: %{t | outputs: List.delete_at(t.outputs, k), rules: Enum.map(t.rules, &%{&1 | outs: List.delete_at(&1.outs, k)})}
+    end)
+  end
 
   def add_input(%__MODULE__{} = m, id) do
     update_in(m.nodes[id].expr, fn t ->

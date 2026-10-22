@@ -362,6 +362,13 @@ defmodule DmnSpike.Editor do
     state
   end
 
+  defp event(%{"t" => "op", "op" => "nparams", "id" => id, "value" => v}, state) do
+    state = push_history(state, {:nparams, id}, :merge)
+    state = %{state | model: Model.set_params(state.model, id, v)}
+    patch(refresh_ops(state))
+    state
+  end
+
   defp event(%{"t" => "op", "op" => "nexpr", "id" => id, "value" => v}, state) do
     state = push_history(state, nil)
     kind = if v == "table", do: :table, else: :context
@@ -376,6 +383,11 @@ defmodule DmnSpike.Editor do
     state
   end
 
+  defp event(%{"t" => "op", "op" => "dtnote", "id" => id, "path" => r, "value" => v}, state) do
+    state = push_history(state, {:note, id, r}, :merge)
+    %{state | model: Model.set_note(state.model, id, String.to_integer(r), v)}
+  end
+
   defp event(%{"t" => "op", "op" => "dthp", "id" => id, "value" => v}, state) do
     state = push_history(state, nil)
     state = %{state | model: Model.set_hit_policy(state.model, id, v)}
@@ -385,6 +397,12 @@ defmodule DmnSpike.Editor do
 
   defp event(%{"t" => "click", "what" => "dt-add-rule:" <> id}, state), do: edit_table(state, &Model.add_rule(&1, id))
   defp event(%{"t" => "click", "what" => "dt-add-input:" <> id}, state), do: edit_table(state, &Model.add_input(&1, id))
+  defp event(%{"t" => "click", "what" => "dt-add-output:" <> id}, state), do: edit_table(state, &Model.add_output(&1, id))
+
+  defp event(%{"t" => "click", "what" => "dt-del-output:" <> rest}, state) do
+    [id, k] = String.split(rest, ":")
+    edit_table(state, &Model.del_output(&1, id, String.to_integer(k)))
+  end
 
   defp event(%{"t" => "click", "what" => "dt-del-rule:" <> rest}, state) do
     [id, r] = String.split(rest, ":")
@@ -581,6 +599,11 @@ defmodule DmnSpike.Editor do
     dropped =
       for {what, n} <- Enum.sort(r.dropped), do: "<li>#{if n > 1, do: "#{n} × "}#{Fmt.esc(what)}</li>"
 
+    converted = for {what, n} <- Enum.sort(r.converted), do: "<li>#{if n > 1, do: "#{n} × "}#{Fmt.esc(what)}</li>"
+
+    conv_html =
+      if converted == [], do: "", else: ~s| Converted: <ul class="dropped">#{converted}</ul>|
+
     placed = if r.placed > 0, do: ", #{r.placed} placed automatically (no diagram shape)", else: ""
 
     drop_html =
@@ -588,7 +611,7 @@ defmodule DmnSpike.Editor do
         do: " Nothing was dropped.",
         else: ~s| Not supported, dropped on import:<ul class="dropped">#{dropped}</ul>|
 
-    ~s|<b>#{Fmt.esc(file)}</b>: imported #{r.nodes} nodes, #{r.edges} requirements, #{r.types} data types#{placed}.#{drop_html}|
+    ~s|<b>#{Fmt.esc(file)}</b>: imported #{r.nodes} nodes, #{r.edges} requirements, #{r.types} data types#{placed}.#{conv_html}#{drop_html}|
   end
 
   defp say(state, msg) do

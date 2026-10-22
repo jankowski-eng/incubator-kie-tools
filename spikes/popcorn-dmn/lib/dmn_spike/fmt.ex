@@ -7,6 +7,8 @@ defmodule DmnSpike.Fmt do
   def value(%Decimal{} = d), do: d |> Decimal.round(4) |> Decimal.normalize() |> Decimal.to_string(:normal)
   def value(v) when is_binary(v), do: inspect(v)
   def value(v) when is_boolean(v), do: to_string(v)
+  def value(%Feel.Value.Function{params: params}), do: "ƒ(" <> Enum.map_join(params, ", ", &elem(&1, 0)) <> ")"
+
   def value(v) when is_map(v) and not is_struct(v),
     do: "{" <> Enum.map_join(Enum.sort(v), ", ", fn {k, x} -> "#{k}: #{value(x)}" end) <> "}"
 

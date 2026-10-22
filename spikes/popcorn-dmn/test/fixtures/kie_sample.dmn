@@ -99,7 +99,7 @@
       <contextEntry>
         <variable id="_c1" name="limit" />
         <literalExpression id="_c1l">
-          <text>Lender Acceptable DTI + 5</text>
+          <text>Lender Acceptable DTI() + 5</text>
         </literalExpression>
       </contextEntry>
       <contextEntry>

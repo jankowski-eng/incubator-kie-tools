@@ -24,12 +24,27 @@ defmodule DmnSpike.Eval do
           for d <- deps, Map.has_key?(acc, d), into: %{}, do: {m.nodes[d].name, acc[d].value}
 
         node_result = eval_node(m.nodes[id], env)
-        errors = DmnSpike.Types.validate(m, node_result.value, m.nodes[id].type_ref)
+        # a business knowledge model's value is a function; its type is the return type
+        errors = if m.nodes[id].type == :bkm, do: [], else: DmnSpike.Types.validate(m, node_result.value, m.nodes[id].type_ref)
         Map.put(acc, id, Map.put(node_result, :errors, errors))
     end
   end
 
   defp eval_node(%{expr: %{kind: :table} = table}, env), do: eval_table(table, env)
+
+  defp eval_node(%{type: :bkm} = node, env) do
+    params = Model.params(node)
+    # cells are checked with the parameters bound to null, the node's value is the function
+    cells = eval_node(%{node | type: :decision}, Enum.reduce(params, env, &Map.put(&2, &1, nil))).cells
+
+    fun =
+      case Feel.eval("function(" <> Enum.join(params, ", ") <> ") " <> body_text(node), env, sandbox: false) do
+        {:ok, f, _} -> f
+        _ -> nil
+      end
+
+    %{value: fun, cells: cells}
+  end
 
   defp eval_node(node, env) do
     {cells, _env, last} =
@@ -54,20 +69,25 @@ defmodule DmnSpike.Eval do
     rules =
       for rule <- t.rules do
         tests = for {entry, i} <- Enum.with_index(rule.entries), do: test_entry(entry, Enum.at(vals, i), env, scope)
-        %{tests: tests, matched: Enum.all?(tests, &(&1 == {:ok, true})), out: eval(rule.out, env)}
+        %{tests: tests, matched: Enum.all?(tests, &(&1 == {:ok, true})), outs: Enum.map(rule.outs, &eval(&1, env))}
       end
 
     errors =
       Map.new(
         (for {{:error, _} = e, i} <- Enum.with_index(inputs), do: {"h-#{i}", e}) ++
           (for {r, ri} <- Enum.with_index(rules), {{:error, _} = e, i} <- Enum.with_index(r.tests), do: {"e-#{ri}-#{i}", e}) ++
-          (for {r, ri} <- Enum.with_index(rules), match?({:error, _}, r.out), do: {"o-#{ri}", r.out})
+          (for {r, ri} <- Enum.with_index(rules), {{:error, _} = e, k} <- Enum.with_index(r.outs), do: {"o-#{ri}-#{k}", e})
       )
 
-    matched = for {r, i} <- Enum.with_index(rules), r.matched, do: {i, value_of(r.out)}
+    names = Enum.map(t.outputs, & &1.name)
+    matched = for {r, i} <- Enum.with_index(rules), r.matched, do: {i, rule_value(names, Enum.map(r.outs, &value_of/1))}
     {value, message} = hit(t.hit_policy, matched)
     %{value: value, cells: [], table: %{matched: Enum.map(rules, & &1.matched), errors: errors, message: message}}
   end
+
+  # one output column gives its value, several give a context keyed by the output names
+  defp rule_value(_names, [value]), do: value
+  defp rule_value(names, values), do: names |> Enum.zip(values) |> Map.new()
 
   defp hit(_, []), do: {nil, "no rule matches"}
   defp hit("UNIQUE", [{_, v}]), do: {v, nil}
@@ -92,6 +112,16 @@ defmodule DmnSpike.Eval do
       end
     end
   end
+
+  # a context body becomes `{rows..., __result: result}.__result` so it can sit inside a function
+  defp body_text(%{expr: %{rows: [], result: result}}), do: blank_null(result)
+
+  defp body_text(%{expr: %{rows: rows, result: result}}) do
+    entries = Enum.map_join(rows, ", ", &"#{&1.name}: #{blank_null(&1.text)}")
+    "{#{entries}, __result: #{blank_null(result)}}.__result"
+  end
+
+  defp blank_null(text), do: if(String.trim(text) == "", do: "null", else: text)
 
   def eval(text, env) do
     if String.trim(text) == "", do: {:ok, nil, []}, else: Feel.eval(text, env, sandbox: false)

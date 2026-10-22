@@ -97,10 +97,10 @@ await cell("e-1-0").fill("< ");
 await settle(500);
 ok("syntax error in an entry is underlined", (await count("#dhl-risk-e-1-0 .err")) > 0);
 await cell("e-1-0").fill("< 28");
-await cell("o-2").fill("1 +");
+await cell("o-2-0").fill("1 +");
 await settle(500);
-ok("syntax error in an output is underlined", (await count("#dhl-risk-o-2 .err")) > 0);
-await cell("o-2").fill('"High"');
+ok("syntax error in an output is underlined", (await count("#dhl-risk-o-2-0 .err")) > 0);
+await cell("o-2-0").fill('"High"');
 await settle(400);
 
 // structure

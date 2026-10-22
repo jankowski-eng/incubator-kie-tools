@@ -13,3 +13,4 @@ packages/xml-parser-ts-codegen/src/schemas/xsd-incomplete--manually-written/XSD.
 
 # @prettier/parser-xml shouldn't mess with auto-generated IntelliJ files
 *.iml
+spikes/popcorn-dmn/test/fixtures/Sample.dmn

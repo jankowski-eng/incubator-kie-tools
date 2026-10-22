@@ -61,7 +61,7 @@ defmodule DmnSpike.Dmn do
     body =
       case n.type do
         :input -> input_ext(n)
-        :bkm -> [el("encapsulatedLogic", [], literal(n.expr.result))]
+        :bkm -> [el("encapsulatedLogic", [], Enum.map(Model.params(n), &el("formalParameter", [{"name", &1}], [])) ++ expression_xml(n.expr))]
         :decision -> expression_xml(n.expr)
       end
 
@@ -75,13 +75,22 @@ defmodule DmnSpike.Dmn do
 
   defp literal(text), do: [el("literalExpression", [], [el("text", [], [text])])]
 
+  defp annotated?(t), do: Map.get(t, :note_title) != nil or Enum.any?(t.rules, &(Map.get(&1, :note, "") != ""))
+
   defp expression_xml(%{kind: :table} = t) do
     [
       el("decisionTable", [{"hitPolicy", t.hit_policy}],
         Enum.map(t.inputs, fn i -> el("input", [], [el("inputExpression", [], [el("text", [], [i.expr])])]) end) ++
-          [el("output", [], [])] ++
+          Enum.map(t.outputs, fn o -> el("output", if(o.name == "", do: [], else: [{"name", o.name}]), []) end) ++
+          if(annotated?(t), do: [el("annotation", [{"name", Map.get(t, :note_title) || "Annotation"}], [])], else: []) ++
           Enum.map(t.rules, fn r ->
-            el("rule", [], Enum.map(r.entries, &el("inputEntry", [], [el("text", [], [&1])])) ++ [el("outputEntry", [], [el("text", [], [r.out])])])
+            el(
+              "rule",
+              [],
+              Enum.map(r.entries, &el("inputEntry", [], [el("text", [], [&1])])) ++
+                Enum.map(r.outs, &el("outputEntry", [], [el("text", [], [&1])])) ++
+                if(annotated?(t), do: [el("annotationEntry", [], [el("text", [], [Map.get(r, :note, "")])])], else: [])
+            )
           end)
       )
     ]
@@ -178,15 +187,18 @@ defmodule DmnSpike.Dmn do
     model = %Model{nodes: nodes, edges: valid, types: types, next: next_id(nodes)}
     model = place_missing(model, Enum.sort(missing))
 
+    all_notes = Enum.flat_map(notes, & &1)
+
     report = %{
       name: attr(attrs, "name"),
       nodes: map_size(nodes),
       edges: length(valid),
       types: length(types),
       placed: length(missing),
+      converted: merge_counts(%{}, for(n <- all_notes, String.contains?(n, ": converted: "), do: String.replace(n, ": converted: ", ": "))),
       dropped:
         Map.merge(dropped, reqs.dropped, fn _, a, b -> a + b end)
-        |> merge_counts(Enum.flat_map(notes, & &1))
+        |> merge_counts(for n <- all_notes, not String.contains?(n, ": converted: "), do: n)
         |> merge_counts(if(extra_diagrams > 0, do: ["extra DMNDiagram"], else: []))
         |> merge_counts(for {f, t, _} <- reqs.edges, !(nodes[f] && nodes[t]), do: "requirement to unknown element")
     }
@@ -281,13 +293,20 @@ defmodule DmnSpike.Dmn do
   end
 
   defp expression(:bkm, kids) do
-    logic = find(kids, "encapsulatedLogic")
+    case find(kids, "encapsulatedLogic") do
+      nil ->
+        {%{rows: [], result: "", params: []}, []}
 
-    case logic && first_expression(children(logic)) do
-      {:literal, t} -> {%{rows: [], result: t}, []}
-      nil -> {%{rows: [], result: ""}, []}
-      {:other, tag} -> {%{rows: [], result: ""}, ["unsupported expression <#{tag}>"]}
-      _ -> {%{rows: [], result: ""}, ["unsupported expression in encapsulatedLogic"]}
+      {_, _, lk} = logic ->
+        params = for {t, a, _} <- Enum.filter(lk, &is_tuple/1), local(t) == "formalParameter", do: attr(a, "name")
+
+        {body, notes} =
+          case expression(:decision, children(logic)) do
+            {%{kind: :table}, notes} -> {%{rows: [], result: ""}, ["decision table in a business knowledge model" | notes]}
+            other -> other
+          end
+
+        {Map.put(body, :params, params), notes}
     end
   end
 
@@ -295,6 +314,7 @@ defmodule DmnSpike.Dmn do
     case first_expression(kids) do
       nil -> {%{rows: [], result: ""}, []}
       {:literal, t} -> {%{rows: [], result: t}, []}
+      {:converted, t, note} -> {%{rows: [], result: t}, [note]}
       {:context, entries, notes} -> context_expr(entries, notes)
       {:table, t, notes} -> {t, notes}
       {:other, tag} -> {%{rows: [], result: ""}, ["unsupported expression <#{tag}>"]}
@@ -311,6 +331,7 @@ defmodule DmnSpike.Dmn do
       {t, _, k} = e ->
         case local(t) do
           "literalExpression" -> {:literal, text(find(k, "text"))}
+          "invocation" -> invocation(e)
           "context" -> {:context, Enum.filter(k, &(is_tuple(&1) and local(elem(&1, 0)) == "contextEntry")), []}
           "decisionTable" -> table(e)
           other -> {:other, other}
@@ -321,6 +342,35 @@ defmodule DmnSpike.Dmn do
     end
   end
 
+  # <invocation> = a call of a business knowledge model: becomes the FEEL call `name(param: expr, ...)`
+  defp invocation({_, _, k}) do
+    k = Enum.filter(k, &is_tuple/1)
+    callee = k |> find("literalExpression") |> children() |> find("text") |> text()
+
+    bindings =
+      for {t, _, bk} <- k, local(t) == "binding" do
+        bk = Enum.filter(bk, &is_tuple/1)
+        param = bk |> find("parameter") |> then(&(&1 && attr(attrs_of(&1), "name")))
+
+        expr =
+          case first_expression(bk) do
+            nil -> "null"
+            {:literal, t} -> t
+            {:converted, t, _} -> t
+            _ -> nil
+          end
+
+        {param, expr}
+      end
+
+    if callee in [nil, ""] or Enum.any?(bindings, fn {p, e} -> p == nil or e == nil end) do
+      {:other, "invocation"}
+    else
+      args = Enum.map_join(bindings, ", ", fn {p, e} -> "#{p}: #{e}" end)
+      {:converted, "#{callee}(#{args})", "converted: invocation to a FEEL function call"}
+    end
+  end
+
   defp context_expr(entries, notes) do
     parsed =
       for {_, _, k} <- entries do
@@ -328,6 +378,7 @@ defmodule DmnSpike.Dmn do
         var = find(k, "variable")
         value = case first_expression(k) do
           {:literal, t} -> {t, []}
+          {:converted, t, note} -> {t, [note]}
           nil -> {"", []}
           {:other, tag} -> {"", ["unsupported context entry expression <#{tag}>"]}
           _ -> {"", ["nested expression in context entry"]}
@@ -345,21 +396,34 @@ defmodule DmnSpike.Dmn do
   defp table({_, attrs, kids}) do
     kids = Enum.filter(kids, &is_tuple/1)
     inputs = for {t, _, k} <- kids, local(t) == "input", do: %{expr: k |> find("inputExpression") |> children() |> find("text") |> text() |> Kernel.||("")}
-    outputs = for {t, _, _} <- kids, local(t) == "output", do: :out
+    outputs = for {t, a, _} <- kids, local(t) == "output", do: %{name: attr(a, "name") || ""}
+    outputs = if outputs == [], do: [%{name: ""}], else: outputs
+    n_out = length(outputs)
 
     rules =
       for {t, _, k} <- kids, local(t) == "rule" do
         k = Enum.filter(k, &is_tuple/1)
         entries = for {t2, _, ek} <- k, local(t2) == "inputEntry", do: text(find(ek, "text")) || ""
-        out = for {t2, _, ek} <- k, local(t2) == "outputEntry", do: out_text(ek)
-        %{entries: entries, out: List.first(out) || ""}
+        outs = for {t2, _, ek} <- k, local(t2) == "outputEntry", do: out_text(ek)
+        note = for {t2, _, ek} <- k, local(t2) == "annotationEntry", do: text(find(ek, "text")) || ""
+        %{entries: entries, outs: Enum.take(outs ++ List.duplicate("", n_out), n_out), note: List.first(note) || ""}
       end
 
+    annotations = for {t, a, _} <- kids, local(t) == "annotation", do: attr(a, "name") || "Annotation"
+
     notes =
-      (if length(outputs) > 1, do: ["decision table with #{length(outputs)} outputs: only the first is kept"], else: []) ++
+      (if length(annotations) > 1, do: ["#{length(annotations) - 1} further annotation columns ignored"], else: []) ++
         (if attr(attrs, "aggregation"), do: ["aggregation #{attr(attrs, "aggregation")} ignored"], else: [])
 
-    {:table, %{kind: :table, hit_policy: attr(attrs, "hitPolicy") || "UNIQUE", inputs: inputs, rules: rules}, notes}
+    {:table,
+     %{
+       kind: :table,
+       hit_policy: attr(attrs, "hitPolicy") || "UNIQUE",
+       inputs: inputs,
+       outputs: outputs,
+       note_title: List.first(annotations),
+       rules: rules
+     }, notes}
   end
 
   defp out_text(kids) do

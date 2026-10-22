@@ -48,6 +48,7 @@ defmodule DmnSpike.Panel do
     t = node.expr
     id = node.id
     n = length(t.inputs)
+    k = length(t.outputs)
     errs = result.table.errors
 
     hp =
@@ -60,25 +61,37 @@ defmodule DmnSpike.Panel do
         ~s|<th class="in">#{dt_ed(id, "h-#{i}", inp.expr, errs)}<button data-click="dt-del-input:#{id}:#{i}" title="Delete input column">✕</button></th>|
       end
 
+    outputs =
+      for {o, j} <- Enum.with_index(t.outputs) do
+        if k == 1 do
+          ~s|<th class="outh">#{Fmt.esc(node.name)}</th>|
+        else
+          ~s|<th class="outh">#{dt_ed(id, "n-#{j}", o.name, errs)}<button data-click="dt-del-output:#{id}:#{j}" title="Delete output column">✕</button></th>|
+        end
+      end
+
     rules =
       for {rule, r} <- Enum.with_index(t.rules) do
         entries = for {e, i} <- Enum.with_index(rule.entries), do: ~s|<td>#{dt_ed(id, "e-#{r}-#{i}", e, errs)}</td>|
+        outs = for {o, j} <- Enum.with_index(rule.outs), do: ~s|<td class="out">#{dt_ed(id, "o-#{r}-#{j}", o, errs)}</td>|
 
         [
           ~s|<tr id="dr-#{id}-#{r}" class="#{rule_class(result, r)}"><td class="rn">#{r + 1}</td>|,
           entries,
-          ~s|<td class="out">#{dt_ed(id, "o-#{r}", rule.out, errs)}</td>|,
+          outs,
+          ~s|<td class="note"><input data-op="dtnote" data-id="#{id}" data-path="#{r}" value="#{Fmt.esc(Map.get(rule, :note, ""))}" spellcheck="false"/></td>|,
           ~s|<td class="rm"><button data-click="dt-del-rule:#{id}:#{r}" title="Delete rule">✕</button></td></tr>|
         ]
       end
 
     IO.iodata_to_binary([
       ~s|<table class="boxed dt"><thead><tr><th class="hp" rowspan="2"><select data-op="dthp" data-id="#{id}" title="Hit policy">#{hp}</select></th>|,
-      ~s|<th colspan="#{max(n, 1)}">Input</th><th>Output</th><th rowspan="2"></th></tr>|,
-      ~s|<tr>#{inputs}<th>#{Fmt.esc(node.name)}</th></tr></thead><tbody>|,
+      ~s|<th colspan="#{max(n, 1)}">Input</th><th colspan="#{k}">Output</th><th rowspan="2" class="noteh">#{Fmt.esc(Map.get(t, :note_title) || "Annotation")}</th><th rowspan="2"></th></tr>|,
+      ~s|<tr>#{inputs}#{outputs}</tr></thead><tbody>|,
       rules,
-      ~s|</tbody><tfoot><tr><td colspan="#{n + 3}"><button data-click="dt-add-rule:#{id}">+ rule</button> |,
-      ~s|<button data-click="dt-add-input:#{id}">+ input</button> <span class="dtv" id="dtv-#{id}">#{table_summary(result)}</span></td></tr></tfoot></table>|
+      ~s|</tbody><tfoot><tr><td colspan="#{n + k + 3}"><button data-click="dt-add-rule:#{id}">+ rule</button> |,
+      ~s|<button data-click="dt-add-input:#{id}">+ input</button> <button data-click="dt-add-output:#{id}">+ output</button> |,
+      ~s|<span class="dtv" id="dtv-#{id}">#{table_summary(result)}</span></td></tr></tfoot></table>|
     ])
   end
 
@@ -102,7 +115,13 @@ defmodule DmnSpike.Panel do
 
     hls =
       [for({inp, i} <- Enum.with_index(t.inputs), do: {"h-#{i}", inp.expr})] ++
-        for({rule, r} <- Enum.with_index(t.rules), do: [{"o-#{r}", rule.out} | for({e, i} <- Enum.with_index(rule.entries), do: {"e-#{r}-#{i}", e})])
+        [if(length(t.outputs) > 1, do: for({o, j} <- Enum.with_index(t.outputs), do: {"n-#{j}", o.name}), else: [])] ++
+        for(
+          {rule, r} <- Enum.with_index(t.rules),
+          do:
+            for({o, j} <- Enum.with_index(rule.outs), do: {"o-#{r}-#{j}", o}) ++
+              for({e, i} <- Enum.with_index(rule.entries), do: {"e-#{r}-#{i}", e})
+        )
 
     hl_ops =
       hls |> List.flatten() |> Enum.map(fn {path, text} -> ["html", "#dhl-#{id}-#{path}", Highlight.html(text, err_span(tbl.errors[path]))] end)
@@ -122,6 +141,10 @@ defmodule DmnSpike.Panel do
     [
       ~s|<div class="nodehead"><input class="nname" data-op="nname" data-id="#{node.id}" value="#{Fmt.esc(node.name)}" spellcheck="false"/>|,
       ~s|<label>type <select data-op="ntype" data-id="#{node.id}">#{opts}</select></label>|,
+      if(node.type == :bkm,
+        do: ~s|<label>parameters <input class="params" data-op="nparams" data-id="#{node.id}" value="#{Fmt.esc(Enum.join(Model.params(node), ", "))}" placeholder="none" spellcheck="false"/></label>|,
+        else: ""
+      ),
       ~s|<label>expression <select data-op="nexpr" data-id="#{node.id}"><option value="context"#{if Model.kind(node) == :context, do: " selected"}>literal / context</option><option value="table"#{if Model.kind(node) == :table, do: " selected"}>decision table</option></select></label>|,
       ~s|<span class="errs" id="nerr-#{node.id}">#{errors_html(result)}</span></div>|
     ]

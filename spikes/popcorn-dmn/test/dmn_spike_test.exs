@@ -168,12 +168,12 @@ defmodule DmnSpikeTest do
   describe "decision tables" do
     defp table_model(policy, rules) do
       m = Model.sample()
-      expr = %{kind: :table, hit_policy: policy, inputs: [%{expr: "Front End Ratio"}], rules: rules}
+      expr = %{kind: :table, hit_policy: policy, inputs: [%{expr: "Front End Ratio"}], outputs: [%{name: ""}], rules: rules}
       put_in(m.nodes["risk"].expr, expr)
     end
 
     defp risk(m), do: Eval.run(m)["risk"]
-    defp rule(entry, out), do: %{entries: [entry], out: out}
+    defp rule(entry, out), do: %{entries: [entry], outs: [out]}
 
     test "the sample table picks the first matching rule" do
       r = risk(Model.sample())
@@ -207,7 +207,7 @@ defmodule DmnSpikeTest do
 
     test "syntax errors are reported per cell" do
       r = risk(table_model("FIRST", [rule("[1..", ~s|"a"|), rule("-", "1 +")]))
-      assert %{"e-0-0" => {:error, _}, "o-1" => {:error, _}} = r.table.errors
+      assert %{"e-0-0" => {:error, _}, "o-1-0" => {:error, _}} = r.table.errors
     end
 
     test "adding and removing rules and inputs keeps entries aligned" do
@@ -259,7 +259,9 @@ defmodule DmnSpikeTest do
       assert length(m.edges) == 6
       assert r.dropped["knowledgeSource"] == 1 and r.dropped["textAnnotation"] == 1 and r.dropped["association"] == 1
       assert r.dropped["authorityRequirement"] == 1
-      assert Enum.any?(r.dropped, fn {k, _} -> String.contains?(k, "unsupported expression <invocation>") end)
+      assert r.dropped |> Map.keys() |> Enum.all?(&(not String.contains?(&1, "invocation")))
+      assert r.converted == %{"Fee: invocation to a FEEL function call" => 1}
+      assert m.nodes["_fee"].expr.result == "feeFunction()"
       assert r.placed == 1 and m.nodes["_fee"].y > m.nodes["_app"].y, "the Fee decision has no DMNShape, so it is placed below the rest"
     end
 
@@ -270,7 +272,7 @@ defmodule DmnSpikeTest do
       assert Types.find(m, "tCategory").constraint == %{kind: :enumeration, text: ~s|"Low", "Medium", "High"|}
       assert Types.find(m, "tScores").collection
       assert %{kind: :table, hit_policy: "FIRST", rules: [_, _]} = m.nodes["_risk"].expr
-      assert %{rows: [%{name: "limit", text: "Lender Acceptable DTI + 5"}]} = m.nodes["_loan_d"].expr
+      assert %{rows: [%{name: "limit", text: "Lender Acceptable DTI() + 5"}]} = m.nodes["_loan_d"].expr
       m = Model.set_text(m, "_app", 0, "{Income: 1000, Debt: 100}")
       r = Eval.run(m)
       assert Decimal.compare(r["_back"].value, 10) == :eq
@@ -311,6 +313,104 @@ defmodule DmnSpikeTest do
     test "string round trip" do
       assert View.to_string({1.0, -2.5, 820.0, 370.0}) == "1.0 -2.5 820.0 370.0"
       assert View.parse("0 -30 820 400") == {0.0, -30.0, 820.0, 400.0}
+    end
+  end
+
+  describe "business knowledge as functions" do
+    test "a BKM with parameters is callable, positionally and by name" do
+      m = Model.sample() |> Model.set_params("dti", "x") |> Model.set_text("dti", 0, "x * 2")
+      call = fn text -> Model.set_text(m, "loan", 0, text) |> Eval.run() |> Map.fetch!("loan") |> Map.fetch!(:value) end
+      assert call.(~s|if Back End Ratio <= Lender Acceptable DTI(x: 18) then "ok" else "no"|) == "ok"
+      assert call.(~s|if Back End Ratio <= Lender Acceptable DTI(10) then "ok" else "no"|) == "no"
+    end
+
+    test "a BKM body can be a context, and the node's value is the function" do
+      m = Model.sample()
+      m = put_in(m.nodes["dti"].expr, %{rows: [%{name: "a", text: "x + 1"}], result: "a * 2", params: ["x"]})
+      r = Eval.run(m)
+      assert DmnSpike.Fmt.value(r["dti"].value) == "ƒ(x)"
+      assert r["dti"].errors == []
+      m = Model.set_text(m, "loan", 0, ~s|Lender Acceptable DTI(x: 4)|)
+      assert Decimal.compare(Eval.run(m)["loan"].value, 10) == :eq
+    end
+
+    test "parameter lists are parsed from text" do
+      m = Model.set_params(Model.sample(), "dti", " a, b ,, c ")
+      assert Model.params(m.nodes["dti"]) == ["a", "b", "c"]
+    end
+  end
+
+  describe "multiple output columns" do
+    test "several outputs give a context keyed by output name" do
+      m = Model.sample() |> Model.add_output("risk") |> Model.set_table_text("risk", ["n", 0], "category") |> Model.set_table_text("risk", ["n", 1], "why")
+      m = m |> Model.set_table_text("risk", ["o", 1, 1], ~s|"medium because < 28"|)
+      r = Eval.run(m)["risk"]
+      assert r.value == %{"category" => "Medium", "why" => "medium because < 28"}
+    end
+
+    test "outputs stay aligned when added and removed, and the last one cannot go" do
+      m = Model.sample() |> Model.add_output("risk") |> Model.add_rule("risk")
+      t = m.nodes["risk"].expr
+      assert length(t.outputs) == 2 and Enum.all?(t.rules, &(length(&1.outs) == 2))
+      m = m |> Model.del_output("risk", 0) |> Model.del_output("risk", 0)
+      t = m.nodes["risk"].expr
+      assert length(t.outputs) == 1 and Enum.all?(t.rules, &(length(&1.outs) == 1))
+    end
+  end
+
+  describe "the real KIE sample (Sample.dmn from sandbox.kie.org)" do
+    alias DmnSpike.Dmn
+
+    setup do
+      {:ok, m, r} = Dmn.from_xml(File.read!("test/fixtures/Sample.dmn"))
+      id = fn name -> Enum.find_value(m.nodes, fn {i, n} -> if n.name == name, do: i end) end
+      %{m: m, r: r, id: id}
+    end
+
+    defp with_inputs(m, id, income, fico) do
+      m
+      |> Model.set_text(id.("Applicant Data"), 0, ~s|{Age: 35, Marital Status: "S", Employment Status: "Employed", Existing Customer: false, Monthly: {Income: #{income}, Repayments: 100, Expenses: 2000, Tax: 300, Insurance: 100}}|)
+      |> Model.set_text(id.("Requested Product"), 0, ~s|{Type: "Standard Loan", Rate: 4.5, Term: 360, Amount: 300000}|)
+      |> Model.set_text(id.("Credit Score"), 0, "{FICO: #{fico}}")
+    end
+
+    test "imports every element", %{m: m, r: r} do
+      assert {r.nodes, r.edges, r.types, r.placed} == {11, 11, 16, 0}
+      assert m.nodes |> Map.values() |> Enum.frequencies_by(& &1.type) == %{input: 3, decision: 4, bkm: 4}
+      assert r.dropped == %{}, "nothing in the real sample should be dropped"
+      assert r.converted == %{"Back End Ratio: invocation to a FEEL function call" => 1, "Front End Ratio: invocation to a FEEL function call" => 1}
+    end
+
+    test "business knowledge models are functions with their parameters", %{m: m, id: id} do
+      assert Model.params(m.nodes[id.("PITI")]) == ["pmt", "tax", "insurance", "income"]
+      assert Model.params(m.nodes[id.("DTI")]) == ["d", "i"]
+      assert Model.params(m.nodes[id.("Lender Acceptable PITI")]) == []
+    end
+
+    test "evaluates to the right qualification and reason", %{m: m, id: id} do
+      out = fn income, fico ->
+        r = m |> with_inputs(id, income, fico) |> Eval.run()
+        assert Enum.all?(r, fn {_, v} -> v.errors == [] end), "values must conform to the model's data types"
+        {r[id.("Credit Score Rating")].value, r[id.("Loan Pre-Qualification")].value}
+      end
+
+      assert {"Good", %{"Qualification" => "Qualified", "Reason" => "The borrower" <> _}} = out.(10_000, 720)
+      assert {"Good", %{"Qualification" => "Not Qualified", "Reason" => "Debt to income ratio is too high."}} = out.(4_000, 720)
+      assert {"Bad", %{"Qualification" => "Not Qualified", "Reason" => "Credit Score too low."}} = out.(10_000, 580)
+    end
+
+    test "ratios are computed from the file's own formulas", %{m: m, id: id} do
+      r = m |> with_inputs(id, 10_000, 720) |> Eval.run()
+      assert [{:ok, dti, _}, {:ok, "Sufficient", _}] = r[id.("Back End Ratio")].cells
+      assert Decimal.equal?(dti, Decimal.new("0.21")), "(repayments 100 + expenses 2000) / income 10000"
+      assert [{:ok, piti, _}, _] = r[id.("Front End Ratio")].cells
+      assert Decimal.compare(piti, Decimal.new("0.0403")) in [:eq, :gt] and Decimal.compare(piti, Decimal.new("0.0404")) == :lt
+    end
+
+    test "export then import is lossless for everything it imported", %{m: m, r: r} do
+      {:ok, m2, r2} = Dmn.from_xml(Dmn.to_xml(m, r.name))
+      assert m2.nodes == m.nodes and Enum.sort(m2.edges) == Enum.sort(m.edges) and m2.types == m.types
+      assert r2.dropped == %{} and r2.converted == %{}
     end
   end
 end

@@ -81,7 +81,7 @@ defmodule DmnSpike.Svg do
   def node_value_text(%{value: v}), do: Fmt.short(v)
 
   def node_title(nil), do: ""
-  def node_title(%{errors: errors}), do: Fmt.esc(Enum.join(errors, "\n"))
+  def node_title(%{value: v, errors: errors}), do: Fmt.esc(Enum.join(["value: " <> Fmt.value(v) | errors], "\n"))
 
   defp node(n, result, selected) do
     invalid? = result != nil and result.errors != []
