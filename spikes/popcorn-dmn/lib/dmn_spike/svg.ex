@@ -20,7 +20,7 @@ defmodule DmnSpike.Svg do
 
   def edge_class(selected?), do: if(selected?, do: "edge sel", else: "edge")
 
-  def edge(%Model{nodes: nodes}, {from, to, kind}, i) do
+  def edge(%Model{nodes: nodes}, {from, to, kind}, _i) do
     {x1, y1, x2, y2} = endpoints(nodes[from], nodes[to])
     dash = if kind == :knowledge, do: ~s| stroke-dasharray="6 4"|, else: ""
     marker = if kind == :knowledge, do: "arrow-open", else: "arrow-fill"

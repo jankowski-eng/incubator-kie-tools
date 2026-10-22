@@ -30,7 +30,8 @@ defmodule DmnSpike.Types do
         scalar("Term", "number", {:enumeration, "120, 180, 240, 360"})
       ]),
       scalar("tRatio", "number", {:range, "[0..100]"}),
-      scalar("tVerdict", "string", {:enumeration, ~s|"Qualified", "Not qualified"|})
+      scalar("tVerdict", "string", {:enumeration, ~s|"Qualified", "Not qualified"|}),
+      scalar("tCategory", "string", {:enumeration, ~s|"Low", "Medium", "High"|})
     ]
   end
 

@@ -57,6 +57,7 @@ defmodule DmnSpikeTest do
 
   test "highlight marks the error span" do
     assert Highlight.html("1 +", {3, 3}) =~ "err eof"
+    assert Highlight.html("< ", {1, 1}) =~ ~s|<span class="op err">&lt;</span>|
     assert Highlight.html(~s|"abc|) =~ ~s|class="err"|
   end
 
@@ -107,7 +108,7 @@ defmodule DmnSpikeTest do
       m = Model.sample()
       t = Types.update(m.types, [0, 1], &%{&1 | name: "Levy"})
       assert Types.get(t, [0, 1]).name == "Levy"
-      assert length(Types.delete(t, [0, 0])) == 4 and length(Types.get(Types.delete(t, [0, 0]), [0]).components) == 3
+      assert length(Types.delete(t, [0, 0])) == 5 and length(Types.get(Types.delete(t, [0, 0]), [0]).components) == 3
       m2 = Types.rename_top(m, 2, "tPercent")
       assert m2.nodes["front"].type_ref == "tPercent" and Types.find(m2, "tPercent")
     end
@@ -158,8 +159,66 @@ defmodule DmnSpikeTest do
       m = Layout.run(Model.sample())
       assert Layout.run(m) == m
       {m2, _} = Model.add_node(Model.sample(), "input", 0, 0)
-      assert Layout.run(m2).nodes |> map_size() == 8
+      assert Layout.run(m2).nodes |> map_size() == 9
       assert Layout.run(%Model{}) == %Model{}
+    end
+  end
+
+  describe "decision tables" do
+    defp table_model(policy, rules) do
+      m = Model.sample()
+      expr = %{kind: :table, hit_policy: policy, inputs: [%{expr: "Front End Ratio"}], rules: rules}
+      put_in(m.nodes["risk"].expr, expr)
+    end
+
+    defp risk(m), do: Eval.run(m)["risk"]
+    defp rule(entry, out), do: %{entries: [entry], out: out}
+
+    test "the sample table picks the first matching rule" do
+      r = risk(Model.sample())
+      assert r.value == "Medium"
+      assert r.table.matched == [false, true, true]
+      assert r.errors == []
+    end
+
+    test "UNIQUE needs exactly one match" do
+      m = table_model("UNIQUE", [rule("> 10", ~s|"a"|), rule("< 30", ~s|"b"|)])
+      r = risk(m)
+      assert r.value == nil and r.table.message =~ "2 rules match"
+      assert risk(table_model("UNIQUE", [rule("> 10", ~s|"a"|), rule("> 1000", ~s|"b"|)])).value == "a"
+      assert risk(table_model("UNIQUE", [rule("> 1000", ~s|"a"|)])).table.message == "no rule matches"
+    end
+
+    test "ANY, COLLECT and RULE ORDER" do
+      same = [rule("> 10", ~s|"x"|), rule("< 30", ~s|"x"|)]
+      assert risk(table_model("ANY", same)).value == "x"
+      assert risk(table_model("ANY", [rule("> 10", ~s|"x"|), rule("< 30", ~s|"y"|)])).table.message =~ "disagree"
+      assert risk(table_model("COLLECT", same)).value == ["x", "x"]
+      assert risk(table_model("RULE ORDER", [rule("> 10", "1"), rule("< 30", "2")])).value |> length() == 2
+    end
+
+    test "entries are unary tests: ranges, lists, negation, wildcard" do
+      for {entry, expected} <- [{"[20..25]", true}, {"10, 25", false}, {"not(25)", true}, {"-", true}, {"", true}, {"> Back End Ratio - 20", true}, {"< Back End Ratio", true}] do
+        r = risk(table_model("FIRST", [rule(entry, ~s|"hit"|)]))
+        assert (r.value == "hit") == expected, "entry #{inspect(entry)}"
+      end
+    end
+
+    test "syntax errors are reported per cell" do
+      r = risk(table_model("FIRST", [rule("[1..", ~s|"a"|), rule("-", "1 +")]))
+      assert %{"e-0-0" => {:error, _}, "o-1" => {:error, _}} = r.table.errors
+    end
+
+    test "adding and removing rules and inputs keeps entries aligned" do
+      m = Model.sample()
+      m = Model.add_input(m, "risk") |> Model.add_rule("risk")
+      t = m.nodes["risk"].expr
+      assert length(t.inputs) == 3 and Enum.all?(t.rules, &(length(&1.entries) == 3)) and length(t.rules) == 4
+      m = Model.del_input(m, "risk", 0) |> Model.del_rule("risk", 3)
+      t = m.nodes["risk"].expr
+      assert length(t.inputs) == 2 and Enum.all?(t.rules, &(length(&1.entries) == 2)) and length(t.rules) == 3
+      assert Model.set_table_text(m, "risk", ["e", 0, 1], "> 5").nodes["risk"].expr.rules |> hd() |> Map.get(:entries) |> Enum.at(1) == "> 5"
+      assert Model.set_expr_kind(m, "risk", :context).nodes["risk"].expr == %{rows: [], result: ""}
     end
   end
 end

@@ -341,6 +341,62 @@
       [hidden] {
         display: none !important;
       }
+      table.dt th.hp {
+        width: 1%;
+        white-space: nowrap;
+        vertical-align: middle;
+      }
+      table.dt th.hp select {
+        font: 600 12px system-ui;
+      }
+      table.dt th.in {
+        min-width: 9rem;
+        font-weight: normal;
+      }
+      table.dt th.in button,
+      table.dt td.rm button {
+        font-size: 11px;
+        padding: 0 0.3rem;
+        opacity: 0.6;
+      }
+      table.dt td.rn {
+        text-align: center;
+        color: var(--muted);
+        font:
+          12px ui-monospace,
+          monospace;
+        width: 1%;
+        padding: 0.35rem 0.5rem;
+        vertical-align: middle;
+      }
+      table.dt td.rm {
+        vertical-align: middle;
+        width: 1%;
+      }
+      table.dt td.out .ed {
+        background: color-mix(in srgb, var(--accent) 6%, Canvas);
+      }
+      table.dt tr.rule.hit td {
+        background: color-mix(in srgb, var(--accent) 14%, Canvas);
+      }
+      table.dt tr.rule.hit td.rn {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      table.dt tfoot td {
+        padding: 0.35rem 0.5rem;
+        border: 0;
+      }
+      table.dt .dtv {
+        margin-left: 0.75rem;
+        font:
+          13px ui-monospace,
+          monospace;
+      }
+      table.dt .dtv .warn {
+        font: 12px system-ui;
+        color: var(--bad);
+      }
     </style>
   </head>
   <body>

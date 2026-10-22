@@ -7,6 +7,7 @@ defmodule DmnSpike.Model do
 
   @type_refs %{
     "loan" => "tVerdict",
+    "risk" => "tCategory",
     "back" => "tRatio",
     "front" => "tRatio",
     "dti" => "number",
@@ -35,6 +36,7 @@ defmodule DmnSpike.Model do
            {"insurance", "Applicant Data.Insurance"},
            {"income", "Applicant Data.Income"}
          ], "(pmt + tax + insurance) / income * 100"},
+        {"risk", :decision, "Risk Category", 650, 280, [], ""},
         {"dti", :bkm, "Lender Acceptable DTI", 10, 30, [], "36"},
         {"piti", :bkm, "Lender Acceptable PITI", 650, 30, [], "28"},
         {"app", :input, "Applicant Data", 170, 280, [],
@@ -55,16 +57,48 @@ defmodule DmnSpike.Model do
       {"app", "back", :info},
       {"app", "front", :info},
       {"prod", "front", :info},
+      {"front", "risk", :info},
+      {"back", "risk", :info},
       {"dti", "loan", :knowledge},
       {"piti", "loan", :knowledge}
     ]
 
+    nodes = put_in(nodes["risk"].expr, risk_table())
     %__MODULE__{nodes: nodes, edges: edges, types: DmnSpike.Types.sample()}
+  end
+
+  defp risk_table do
+    %{
+      kind: :table,
+      hit_policy: "FIRST",
+      inputs: [%{expr: "Front End Ratio"}, %{expr: "Back End Ratio"}],
+      rules: [
+        %{entries: ["< 20", "< 30"], out: ~s|"Low"|},
+        %{entries: ["< 28", "-"], out: ~s|"Medium"|},
+        %{entries: ["-", "-"], out: ~s|"High"|}
+      ]
+    }
   end
 
   def move(%__MODULE__{} = m, id, x, y), do: update_in(m.nodes[id], &%{&1 | x: round(x), y: round(y)})
 
-  @doc "Cells of a node: `{label, text}`; the last has label `:result`."
+  @hit_policies ["UNIQUE", "FIRST", "ANY", "COLLECT", "RULE ORDER"]
+  def hit_policies, do: @hit_policies
+
+  def kind(%{expr: expr}), do: Map.get(expr, :kind, :context)
+
+  def new_table,
+    do: %{kind: :table, hit_policy: "UNIQUE", inputs: [%{expr: ""}], rules: [%{entries: ["-"], out: ""}]}
+
+  def set_expr_kind(%__MODULE__{} = m, id, :table), do: put_in(m.nodes[id].expr, new_table())
+  def set_expr_kind(%__MODULE__{} = m, id, :context), do: put_in(m.nodes[id].expr, %{rows: [], result: ""})
+
+  def cell_count(%{expr: %{kind: :table, inputs: ins, rules: rules}}), do: length(ins) + length(rules) * (length(ins) + 1)
+  def cell_count(node), do: length(cells(node))
+
+  @doc "Cells of a context/literal node: `{label, text}`; the last has label `:result`. Tables have none."
+  def cells(%{expr: %{kind: :table}}), do: []
+
   def cells(%{expr: %{rows: rows, result: result}}),
     do: Enum.map(rows, &{&1.name, &1.text}) ++ [{:result, result}]
 
@@ -73,6 +107,38 @@ defmodule DmnSpike.Model do
       if idx < length(rows),
         do: %{expr | rows: List.update_at(rows, idx, &%{&1 | text: text})},
         else: %{expr | result: text}
+    end)
+  end
+
+  # --- decision tables (paths: ["h", input], ["e", rule, input], ["o", rule]) ---------
+
+  def set_table_text(%__MODULE__{} = m, id, path, text) do
+    update_in(m.nodes[id].expr, fn t ->
+      case path do
+        ["h", i] -> %{t | inputs: List.update_at(t.inputs, i, &%{&1 | expr: text})}
+        ["e", r, i] -> %{t | rules: List.update_at(t.rules, r, fn rule -> %{rule | entries: List.replace_at(rule.entries, i, text)} end)}
+        ["o", r] -> %{t | rules: List.update_at(t.rules, r, &%{&1 | out: text})}
+      end
+    end)
+  end
+
+  def set_hit_policy(%__MODULE__{} = m, id, hp) when hp in @hit_policies, do: put_in(m.nodes[id].expr.hit_policy, hp)
+
+  def add_rule(%__MODULE__{} = m, id) do
+    update_in(m.nodes[id].expr, fn t -> %{t | rules: t.rules ++ [%{entries: Enum.map(t.inputs, fn _ -> "-" end), out: ""}]} end)
+  end
+
+  def del_rule(%__MODULE__{} = m, id, r), do: update_in(m.nodes[id].expr, fn t -> %{t | rules: List.delete_at(t.rules, r)} end)
+
+  def add_input(%__MODULE__{} = m, id) do
+    update_in(m.nodes[id].expr, fn t ->
+      %{t | inputs: t.inputs ++ [%{expr: ""}], rules: Enum.map(t.rules, &%{&1 | entries: &1.entries ++ ["-"]})}
+    end)
+  end
+
+  def del_input(%__MODULE__{} = m, id, i) do
+    update_in(m.nodes[id].expr, fn t ->
+      %{t | inputs: List.delete_at(t.inputs, i), rules: Enum.map(t.rules, &%{&1 | entries: List.delete_at(&1.entries, i)})}
     end)
   end
 

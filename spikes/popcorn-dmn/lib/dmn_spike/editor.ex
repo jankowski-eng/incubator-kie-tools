@@ -72,6 +72,7 @@ defmodule DmnSpike.Editor do
       if (e.target.dataset.cell && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) ed(cell(e, 'focus'));
     });
     panel.addEventListener('keydown', (e) => {
+      if (e.target.dataset.op === 'dtcell' && e.key === 'Enter') e.preventDefault();
       if (!e.target.dataset.cell) return;
       if (e.key === 'Enter') e.preventDefault();
       if (e.key === 'Tab' && !e.shiftKey && panel.querySelector('.ac li')) { e.preventDefault(); ed({...cell(e, 'ac'), pick: 0}); }
@@ -264,6 +265,40 @@ defmodule DmnSpike.Editor do
     state
   end
 
+  defp event(%{"t" => "op", "op" => "nexpr", "id" => id, "value" => v}, state) do
+    state = push_history(state, nil)
+    kind = if v == "table", do: :table, else: :context
+    render_all(%{state | model: Model.set_expr_kind(state.model, id, kind)}, true)
+  end
+
+  defp event(%{"t" => "op", "op" => "dtcell", "id" => id, "path" => p, "value" => v}, state) do
+    state = push_history(state, {:dt, id, p}, :merge)
+    path = p |> String.split("-") |> Enum.map(fn x -> if x in ["h", "e", "o"], do: x, else: String.to_integer(x) end)
+    state = %{state | model: Model.set_table_text(state.model, id, path, v)}
+    patch(refresh_ops(state))
+    state
+  end
+
+  defp event(%{"t" => "op", "op" => "dthp", "id" => id, "value" => v}, state) do
+    state = push_history(state, nil)
+    state = %{state | model: Model.set_hit_policy(state.model, id, v)}
+    patch(refresh_ops(state))
+    state
+  end
+
+  defp event(%{"t" => "click", "what" => "dt-add-rule:" <> id}, state), do: edit_table(state, &Model.add_rule(&1, id))
+  defp event(%{"t" => "click", "what" => "dt-add-input:" <> id}, state), do: edit_table(state, &Model.add_input(&1, id))
+
+  defp event(%{"t" => "click", "what" => "dt-del-rule:" <> rest}, state) do
+    [id, r] = String.split(rest, ":")
+    edit_table(state, &Model.del_rule(&1, id, String.to_integer(r)))
+  end
+
+  defp event(%{"t" => "click", "what" => "dt-del-input:" <> rest}, state) do
+    [id, i] = String.split(rest, ":")
+    edit_table(state, &Model.del_input(&1, id, String.to_integer(i)))
+  end
+
   defp event(%{"t" => "op", "op" => "tname", "path" => p, "value" => v, "kind" => kind}, state) do
     path = path(p)
     state = push_history(state, {:tname, p}, :merge)
@@ -332,6 +367,14 @@ defmodule DmnSpike.Editor do
     state
   end
 
+  defp edit_table(state, fun) do
+    state = push_history(state, nil)
+    state = %{state | model: fun.(state.model)}
+    results = Eval.run(state.model)
+    patch([["html", "#panel", Panel.render(state.model, state.selected, results)] | refresh_ops(state, results)])
+    state
+  end
+
   defp edit_types(state, fun) do
     state = push_history(state, nil)
     state = %{state | model: %{state.model | types: fun.(state.model.types)}}
@@ -389,8 +432,8 @@ defmodule DmnSpike.Editor do
 
   # patches for everything that depends on evaluation: value badges, validation, shown table
   defp refresh_ops(state, results \\ nil, us \\ nil) do
-    {us, results} = if results, do: {us, results}, else: :timer.tc(fn -> Eval.run(state.model) end)
-    n = state.model.nodes |> Map.values() |> Enum.map(&length(Model.cells(&1))) |> Enum.sum()
+    {us, results} = if results, do: {us || 0, results}, else: :timer.tc(fn -> Eval.run(state.model) end)
+    n = state.model.nodes |> Map.values() |> Enum.map(&Model.cell_count/1) |> Enum.sum()
 
     node_ops =
       for {nid, node} <- state.model.nodes, r = results[nid], reduce: [] do
@@ -412,7 +455,12 @@ defmodule DmnSpike.Editor do
           []
       end
 
-    node_ops ++ shown ++ [["html", "#status", "evaluated #{n} cells in #{Float.round(us / 1000, 1)} ms"]] ++ history_ops(state)
+    table =
+      if state.selected && state.model.nodes[state.selected] && Model.kind(state.model.nodes[state.selected]) == :table,
+        do: Panel.table_ops(state.model, state.selected, results[state.selected]),
+        else: []
+
+    node_ops ++ shown ++ table ++ [["html", "#status", "evaluated #{n} cells in #{Float.round(us / 1000, 1)} ms"]] ++ history_ops(state)
   end
 
   defp say(state, msg) do

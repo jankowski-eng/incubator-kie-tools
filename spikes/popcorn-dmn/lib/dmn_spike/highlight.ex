@@ -46,7 +46,8 @@ defmodule DmnSpike.Highlight do
   end
 
   defp overlaps?(nil, _, _), do: false
-  defp overlaps?({a, b}, from, to), do: if(a == b, do: false, else: a < to and b > from)
+  # a zero-length error (e.g. "expected an expression" right after `<`) marks the token that ends there
+  defp overlaps?({a, b}, from, to), do: if(a == b, do: to == a and from < to, else: a < to and b > from)
 
   defp class(%{kind: :number}, _), do: "n"
   defp class(%{kind: :string}, _), do: "s"
