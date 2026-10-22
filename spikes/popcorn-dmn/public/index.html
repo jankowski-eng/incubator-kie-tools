@@ -964,17 +964,29 @@
     <script type="module">
       import { Popcorn } from "./out/index.mjs";
       const t0 = performance.now();
-      try {
-        await Popcorn.init({
-          onStdout: console.log,
-          onStderr: console.error,
-          timeoutsMs: { boot: 120000, appStartup: 120000 },
-        });
-        console.log(`popcorn booted in ${Math.round(performance.now() - t0)} ms`);
-        document.documentElement.dataset.popcorn = "booted";
-      } catch (e) {
-        document.querySelector("#status").textContent = "Popcorn failed: " + (e && (e.message || JSON.stringify(e)));
-        document.documentElement.dataset.popcorn = "failed";
+      // Popcorn needs SharedArrayBuffer, which browsers only provide to cross-origin isolated pages. When this page
+      // is embedded or served without the right headers, say so instead of hanging on "Starting Popcorn...".
+      if (!self.crossOriginIsolated) {
+        document.querySelector("#status").textContent = "Cannot start: this page is not cross-origin isolated.";
+        document.querySelector("#report").innerHTML =
+          "<b>This editor cannot run here.</b> It needs a cross-origin isolated page: serve it with " +
+          "<code>Cross-Origin-Opener-Policy: same-origin</code> and <code>Cross-Origin-Embedder-Policy: require-corp</code> " +
+          "(or <code>credentialless</code>). When embedded in an iframe the host page needs the same headers and the iframe " +
+          '<code>allow="cross-origin-isolated"</code>. See <code>EMBEDDING.md</code>.';
+        document.documentElement.dataset.popcorn = "unsupported";
+      } else {
+        try {
+          await Popcorn.init({
+            onStdout: console.log,
+            onStderr: console.error,
+            timeoutsMs: { boot: 120000, appStartup: 120000 },
+          });
+          console.log(`popcorn booted in ${Math.round(performance.now() - t0)} ms`);
+          document.documentElement.dataset.popcorn = "booted";
+        } catch (e) {
+          document.querySelector("#status").textContent = "Popcorn failed: " + (e && (e.message || JSON.stringify(e)));
+          document.documentElement.dataset.popcorn = "failed";
+        }
       }
     </script>
   </body>
