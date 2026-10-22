@@ -3,18 +3,31 @@ defmodule DmnSpike.TypesPanel do
 
   alias DmnSpike.{Fmt, Highlight, Model, Types}
 
-  def render(%Model{types: []}),
+  def render(%Model{types: []}, _sel),
     do: ~s|<p class="hint">No data types yet.</p><button data-click="add-type">+ Add data type</button>|
 
-  def render(%Model{} = m) do
-    rows = m.types |> Enum.with_index() |> Enum.flat_map(fn {t, i} -> rows(m, t, [i], 0) end)
+  def render(%Model{} = m, sel) do
+    sel = sel |> max(0) |> min(length(m.types) - 1)
+    t = Enum.at(m.types, sel)
 
     IO.iodata_to_binary([
+      ~s|<div class="tsplit"><nav class="tlist" aria-label="Data types">|,
+      for({x, i} <- Enum.with_index(m.types), do: item(x, i, i == sel)),
+      ~s|<button class="tadd" data-click="add-type">+ Data type</button></nav><section class="tdetail">|,
       ~s|<table class="types"><thead><tr><th>Name</th><th>Type</th><th>List</th><th>Constraint</th><th></th></tr></thead><tbody>|,
-      rows,
-      ~s|</tbody></table><p><button data-click="add-type">+ Add data type</button></p>|
+      rows(m, t, [sel], 0),
+      ~s|</tbody></table></section></div>|
     ])
   end
+
+  defp item(t, i, on?) do
+    ~s|<button class="titem#{if on?, do: " on"}" data-click="pick-type:#{i}"><b id="tn-#{i}">#{Fmt.esc(t.name)}</b><small>#{summary(t)}</small></button>|
+  end
+
+  defp summary(%{components: [_ | _] = cs} = t),
+    do: "#{if t.collection, do: "list of "}structure · #{length(cs)} field#{if length(cs) != 1, do: "s"}"
+
+  defp summary(t), do: "#{if t.collection, do: "list of "}#{Fmt.esc(t.ref || "structure")}"
 
   def path_id(path), do: Enum.join(path, "-")
 

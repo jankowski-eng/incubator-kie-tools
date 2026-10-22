@@ -183,6 +183,7 @@ defmodule DmnSpike.Editor do
       drag: nil,
       group: nil,
       connect: nil,
+      type_sel: 0,
       tab: "editor",
       report: nil,
       name: "Popcorn spike",
@@ -362,7 +363,13 @@ defmodule DmnSpike.Editor do
   defp event(%{"t" => "click", "what" => "add-type"}, state) do
     names = MapSet.new(state.model.types, & &1.name)
     name = Enum.find(for(i <- 1..99, do: "tNewType#{i}"), &(not MapSet.member?(names, &1)))
-    edit_types(state, fn types -> types ++ [Types.new_type(name)] end)
+    edit_types(%{state | type_sel: length(state.model.types)}, fn types -> types ++ [Types.new_type(name)] end)
+  end
+
+  defp event(%{"t" => "click", "what" => "pick-type:" <> i}, state) do
+    state = %{state | type_sel: String.to_integer(i)}
+    patch_types(state)
+    state
   end
 
   defp event(%{"t" => "click", "what" => "add-child:" <> p}, state),
@@ -487,6 +494,7 @@ defmodule DmnSpike.Editor do
 
     state = %{state | model: model}
     patch(refresh_ops(state))
+    if match?([_], path), do: patch([["html", "#tn-#{p}", Fmt.esc(v)]])
     if kind == "change", do: patch_types(state)
     state
   end
@@ -609,7 +617,7 @@ defmodule DmnSpike.Editor do
   defp history_ops(state),
     do: [["disabled", "[data-click=undo]", state.past == []], ["disabled", "[data-click=redo]", state.future == []]]
 
-  defp patch_types(state), do: patch([["html", "#types", TypesPanel.render(state.model)]])
+  defp patch_types(state), do: patch([["html", "#types", TypesPanel.render(state.model, state.type_sel)]])
 
   # patches for everything that depends on evaluation: value badges, validation, shown table
   defp refresh_ops(state, results \\ nil, us \\ nil) do
@@ -715,7 +723,7 @@ defmodule DmnSpike.Editor do
         ["attr", "#drd", "viewBox", viewbox(state)],
         ["html", "#scene", Svg.scene(state.model, results, state.selected, state.sel_edge)],
         ["html", "#panel", Panel.render(state.model, state.selected, results)],
-        ["html", "#types", TypesPanel.render(state.model)],
+        ["html", "#types", TypesPanel.render(state.model, state.type_sel)],
         ["hidden", "#view-editor", state.tab != "editor"],
         ["hidden", "#view-types", state.tab != "types"],
         ["hidden", "#view-xml", state.tab != "xml"],

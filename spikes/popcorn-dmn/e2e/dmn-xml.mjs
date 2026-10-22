@@ -146,9 +146,9 @@ await page.locator('[data-click="tab:types"]').click();
 await settle(400);
 ok(
   "imported data types in the Data types tab",
-  (await count("table.types tbody tr")) === 5 &&
+  (await count(".tlist .titem")) === 3 &&
     (await page.locator('select[data-op=ckind][data-path="0-0"]').inputValue()) === "range",
-  String(await count("table.types tbody tr"))
+  String(await count(".tlist .titem"))
 );
 await page.locator('[data-click="tab:editor"]').click();
 await settle(300);

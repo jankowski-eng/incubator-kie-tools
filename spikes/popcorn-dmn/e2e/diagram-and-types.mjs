@@ -44,13 +44,21 @@ ok(
   (await page.locator("#view-editor").isHidden()) && (await page.locator("#view-types").isVisible())
 );
 ok(
-  "tree shows 5 types + 7 components",
-  (await count("table.types tbody tr")) === 12,
+  "list shows the 5 types, the first is selected with its 4 fields",
+  (await count(".tlist .titem")) === 5 &&
+    (await count(".titem.on")) === 1 &&
+    (await count("table.types tbody tr")) === 5 &&
+    (await text(".titem.on b")) === "tApplicant",
   String(await count("table.types tbody tr"))
 );
+ok("struct has +field", (await count('[data-click="add-child:0"]')) === 1);
+await page.locator('[data-click="pick-type:2"]').click();
+await settle(300);
 ok(
-  "struct has +field, scalar does not",
-  (await count('[data-click="add-child:0"]')) === 1 && (await count('[data-click="add-child:2"]')) === 0
+  "picking a type shows only that type; a scalar has no +field",
+  (await count("table.types tbody tr")) === 1 &&
+    (await text(".titem.on b")) === "tRatio" &&
+    (await count('[data-click="add-child:2"]')) === 0
 );
 ok(
   "constraint kinds shown (range on tRatio)",
@@ -87,13 +95,21 @@ await page.locator('textarea[data-op=ctext][data-path="2"]').fill("[0..100]");
 await settle(400);
 
 // remove constraint of tVerdict, add field to tApplicant, rename tRatio
+await page.locator('[data-click="pick-type:3"]').click();
+await settle(300);
 await page.locator('select[data-op=ckind][data-path="3"]').selectOption("");
 await settle(400);
 ok("constraint editor disappears when kind is none", (await count('textarea[data-op=ctext][data-path="3"]')) === 0);
+await page.locator('[data-click="pick-type:0"]').click();
+await settle(300);
 await page.locator('[data-click="add-child:0"]').click();
 await settle(400);
-ok("add field appends a component row", (await count("table.types tbody tr")) === 13);
+ok("add field appends a component row", (await count("table.types tbody tr")) === 6);
+await page.locator('[data-click="pick-type:2"]').click();
+await settle(300);
 await page.locator('input[data-op=tname][data-path="2"]').fill("tPercent");
+await settle(200);
+ok("the list label follows the name while typing", (await text("#tn-2")) === "tPercent");
 await page.locator('input[data-op=tname][data-path="2"]').blur();
 await settle(500);
 await page.locator('[data-click="tab:editor"]').click();
@@ -104,6 +120,25 @@ ok(
   await page.locator("select[data-op=ntype]").inputValue()
 );
 ok("still valid after rename", (await count(".node.invalid")) === 0);
+
+await page.locator('[data-click="tab:types"]').click();
+await settle(300);
+await page.locator('[data-click="add-type"]').click();
+await settle(400);
+ok(
+  "adding a data type selects it",
+  (await count(".tlist .titem")) === 6 && (await text(".titem.on b")) === "tNewType1",
+  await text(".titem.on b")
+);
+await page.screenshot({ path: `${OUT}/t3.png` });
+await page.locator("[data-click=undo]").click();
+await settle(400);
+ok(
+  "undo removes it and keeps a valid selection",
+  (await count(".tlist .titem")) === 5 && (await count(".titem.on")) === 1
+);
+await page.locator('[data-click="tab:editor"]').click();
+await settle();
 
 // ---------- palette drag-in
 await page.dragAndDrop('#palette [data-kind="decision"]', "#drd", { targetPosition: { x: 120, y: 330 } });
