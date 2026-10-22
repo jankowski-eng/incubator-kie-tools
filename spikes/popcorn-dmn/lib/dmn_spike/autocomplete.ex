@@ -5,9 +5,32 @@ defmodule DmnSpike.Autocomplete do
 
   @builtins ~w(sum count min max mean abs floor ceiling round string length contains substring date time duration now today not)
 
-  @doc "Returns `{start_byte, names}` for the word ending at `caret`."
+  @doc """
+  Splits `text` at the browser's cursor offset. The browser counts UTF-16 code units, so a character
+  outside the Basic Multilingual Plane (an emoji) counts as two; Elixir's `String.slice/3` counts
+  whole characters and would end up one position too far for every such character before the cursor.
+  """
+  def split_utf16(text, units) do
+    {taken, _} =
+      text
+      |> String.codepoints()
+      |> Enum.reduce_while({[], 0}, fn cp, {acc, n} ->
+        if n >= units, do: {:halt, {acc, n}}, else: {:cont, {[cp | acc], n + utf16_units(cp)}}
+      end)
+
+    prefix = taken |> Enum.reverse() |> Enum.join()
+    {prefix, binary_part(text, byte_size(prefix), byte_size(text) - byte_size(prefix))}
+  end
+
+  @doc "Length of `text` in UTF-16 code units, the unit `setSelectionRange` expects."
+  def utf16_length(text), do: text |> String.codepoints() |> Enum.reduce(0, &(utf16_units(&1) + &2))
+
+  defp utf16_units(<<cp::utf8>>) when cp > 0xFFFF, do: 2
+  defp utf16_units(_), do: 1
+
+  @doc "Returns `{start_byte, names}` for the word ending at `caret` (a UTF-16 offset)."
   def suggest(%Model{} = m, id, idx, text, caret) do
-    before = String.slice(text, 0, caret)
+    {before, _} = split_utf16(text, caret)
 
     case Regex.run(~r/[A-Za-z_][\w ]*$/u, before) do
       [run] ->
@@ -42,11 +65,11 @@ defmodule DmnSpike.Autocomplete do
     "<ul>#{items}</ul>"
   end
 
-  @doc "The text after accepting suggestion `pick`, and the new caret (in characters)."
+  @doc "The text after accepting suggestion `pick`, and the new caret as a UTF-16 offset."
   def accept(text, caret, start, names, pick) do
     name = Enum.at(names, pick)
     before = binary_part(text, 0, start)
-    after_caret = String.slice(text, caret, String.length(text))
-    {before <> name <> after_caret, String.length(before <> name)}
+    {_, after_caret} = split_utf16(text, caret)
+    {before <> name <> after_caret, utf16_length(before <> name)}
   end
 end

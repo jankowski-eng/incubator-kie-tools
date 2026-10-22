@@ -128,6 +128,25 @@ await settle(500);
 ok("Tab accepts first suggestion", (await loan.inputValue()) === "if Front End Ratio", await loan.inputValue());
 ok("highlight tracks accepted text", (await page.locator("#hl-loan-0").textContent()) === "if Front End Ratio");
 
+// --- autocomplete with an emoji before the cursor (the browser counts UTF-16 units)
+await loan.fill('"😀" = Fro + 1');
+await settle(300);
+await loan.press("End");
+for (let i = 0; i < 4; i++) await loan.press("ArrowLeft");
+await settle(500);
+ok(
+  "suggestions appear for a word after an emoji",
+  (await page.locator("#ac-loan-0 li").allTextContents()).includes("Front End Ratio")
+);
+await loan.press("Tab");
+await settle(500);
+const emojiText = await loan.inputValue();
+ok("Tab completes in place and keeps the text after the cursor", emojiText === '"😀" = Front End Ratio + 1', emojiText);
+ok(
+  "the cursor lands right after the completed name",
+  (await loan.evaluate((el) => el.selectionStart)) === emojiText.indexOf(" + 1")
+);
+
 // --- model-level undo of typing
 await page.locator("[data-click=undo]").click();
 await settle(500);

@@ -437,4 +437,32 @@ defmodule DmnSpikeTest do
       assert m.nodes["n2"].name == "Imported" and m.nodes["n3"].name == "Also"
     end
   end
+
+  describe "autocomplete cursor offsets are UTF-16 units" do
+    alias DmnSpike.Autocomplete
+
+    test "split and length agree with how the browser counts" do
+      assert Autocomplete.utf16_length("a😀b") == 4
+      assert Autocomplete.split_utf16("a😀b", 3) == {"a😀", "b"}
+      assert Autocomplete.split_utf16("a😀b", 99) == {"a😀b", ""}
+      assert Autocomplete.split_utf16("é日本", 2) == {"é日", "本"}
+      assert Autocomplete.split_utf16("abc", 0) == {"", "abc"}
+    end
+
+    test "an emoji before the cursor does not shift the prefix" do
+      m = Model.sample()
+      # `"😀" = Fro + 1` with the cursor after "Fro": the browser reports 10 (the emoji counts as 2)
+      text = ~s|"😀" = Fro + 1|
+      caret = Autocomplete.utf16_length(~s|"😀" = Fro|)
+      assert caret == 10
+      {start, names} = Autocomplete.suggest(m, "back", 0, text, caret)
+      assert "Front End Ratio" in names
+      assert binary_part(text, start, byte_size("Fro")) == "Fro"
+
+      {new, new_caret} = Autocomplete.accept(text, caret, start, names, Enum.find_index(names, &(&1 == "Front End Ratio")))
+      assert new == ~s|"😀" = Front End Ratio + 1|
+      assert new_caret == Autocomplete.utf16_length(~s|"😀" = Front End Ratio|)
+      assert String.slice(new, 0..-5//1) |> String.ends_with?("Front End Ratio")
+    end
+  end
 end
