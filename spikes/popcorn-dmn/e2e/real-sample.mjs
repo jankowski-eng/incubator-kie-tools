@@ -2,6 +2,7 @@
 // Imports the real KIE sample (test/fixtures/Sample.dmn, from sandbox.kie.org), gives it inputs and checks the decisions.
 // Run: PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core OUT=/tmp node e2e/real-sample.mjs
 import { createRequire } from "node:module";
+import fs from "node:fs";
 const require = createRequire(`${process.env.PLAYWRIGHT_CORE}/`);
 const OUT = process.env.OUT ?? ".";
 const SAMPLE = new URL("../test/fixtures/Sample.dmn", import.meta.url).pathname;
@@ -38,11 +39,35 @@ ok(
   report.slice(0, 100)
 );
 ok(
-  "nothing dropped, two invocations converted",
-  report.includes("Nothing was dropped") && (report.match(/invocation to a FEEL function call/g) ?? []).length === 2,
+  "nothing lost, two invocations converted",
+  report.includes("Nothing was lost") && (report.match(/invocation to a FEEL function call/g) ?? []).length === 2,
   report.slice(0, 260)
 );
 ok("file positions kept (no automatic placement)", !report.includes("placed automatically"));
+
+// saving without edits must give back every element of the file, in the file's own prefixes, with its licence header
+const tagCounts = (xml) => {
+  const counts = {};
+  for (const m of xml.replace(/<!--[\s\S]*?-->/g, "").matchAll(/<([A-Za-z][\w:.-]*)[\s>/]/g))
+    counts[m[1]] = (counts[m[1]] ?? 0) + 1;
+  return counts;
+};
+const original = fs.readFileSync(SAMPLE, "utf8");
+const [dl0] = await Promise.all([page.waitForEvent("download"), page.locator('[data-click="export"]').click()]);
+await dl0.saveAs(`${OUT}/real-unedited.dmn`);
+const unedited = fs.readFileSync(`${OUT}/real-unedited.dmn`, "utf8");
+ok(
+  "saving without edits keeps every element of the real file",
+  JSON.stringify(Object.entries(tagCounts(unedited)).sort()) ===
+    JSON.stringify(Object.entries(tagCounts(original)).sort()),
+  `${Object.keys(tagCounts(unedited)).length} element names`
+);
+ok(
+  "licence header and the file's own prefixes are kept",
+  unedited.includes("Licensed to the Apache Software Foundation") &&
+    unedited.includes("<dmn:definitions") &&
+    !unedited.includes("<decision ")
+);
 
 // node ids come from the file; look them up by name
 const idOf = async (name) =>
@@ -145,6 +170,25 @@ ok("changing parameters changes the function", (await full(ids.PITI)) === "ƒ(pm
 await page.locator("input[data-op=nparams]").fill("pmt, tax, insurance, income");
 await settle(400);
 
+// after editing, everything the editor does not touch is still in the saved file
+const [dlEdited] = await Promise.all([page.waitForEvent("download"), page.locator('[data-click="export"]').click()]);
+await dlEdited.saveAs(`${OUT}/real-edited.dmn`);
+const edited = fs.readFileSync(`${OUT}/real-edited.dmn`, "utf8");
+const before = tagCounts(original);
+const afterCounts = tagCounts(edited);
+ok(
+  "after editing, no element of the original is gone",
+  Object.entries(before).every(([name, n]) => (afterCounts[name] ?? 0) >= n),
+  Object.entries(before)
+    .filter(([name, n]) => (afterCounts[name] ?? 0) < n)
+    .map(([k]) => k)
+    .join(", ")
+);
+ok(
+  "…and the DMNDI styles and labels are intact",
+  (edited.match(/<dmndi:DMNStyle/g) ?? []).length === 11 && (edited.match(/<dmndi:DMNLabel/g) ?? []).length === 11
+);
+
 // export the whole thing and bring it back
 const [dl] = await Promise.all([page.waitForEvent("download"), page.locator('[data-click="export"]').click()]);
 await dl.saveAs(`${OUT}/real-export.dmn`);
@@ -152,10 +196,8 @@ await page.locator("#file").setInputFiles(`${OUT}/real-export.dmn`);
 await settle(1200);
 const report2 = await text("#report");
 ok(
-  "export then import: nothing dropped or converted",
-  report2.includes("imported 11 nodes, 11 requirements, 16 data types") &&
-    report2.includes("Nothing was dropped") &&
-    !report2.includes("Converted"),
+  "export then import: still nothing lost",
+  report2.includes("imported 11 nodes, 11 requirements, 16 data types") && report2.includes("Nothing was lost"),
   report2.slice(0, 160)
 );
 console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);

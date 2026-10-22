@@ -32,6 +32,9 @@ defmodule DmnSpike.Eval do
 
   defp eval_node(%{expr: %{kind: :table} = table}, env), do: eval_table(table, env)
 
+  # an expression the editor cannot edit yet is kept as it is and not evaluated
+  defp eval_node(%{expr: %{kind: :raw}}, _env), do: %{value: nil, cells: []}
+
   defp eval_node(%{type: :bkm} = node, env) do
     params = Model.params(node)
     # cells are checked with the parameters bound to null, the node's value is the function

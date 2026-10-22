@@ -86,9 +86,9 @@ ok(
   await text("#report")
 );
 ok(
-  "report says nothing was dropped",
+  "report says nothing was lost",
   (await text("#report")).includes("imported 8 nodes, 10 requirements, 5 data types") &&
-    (await text("#report")).includes("Nothing was dropped"),
+    (await text("#report")).includes("Nothing was lost"),
   (await text("#report")).slice(0, 120)
 );
 
@@ -104,7 +104,7 @@ ok(
   report.slice(0, 160)
 );
 ok(
-  "report lists dropped elements",
+  "report lists what is kept as in the file",
   [
     "knowledgeSource",
     "textAnnotation",
@@ -160,8 +160,10 @@ await page.locator("#file").setInputFiles(`${OUT}/fixture-export.dmn`);
 await settle(900);
 const report2 = await text("#report");
 ok(
-  "exporting the imported fixture and importing again drops nothing",
-  report2.includes("imported 6 nodes, 6 requirements, 3 data types") && report2.includes("Nothing was dropped"),
+  "exporting the imported fixture and importing again loses nothing",
+  report2.includes("imported 6 nodes, 6 requirements, 3 data types") &&
+    !report2.includes("Lost when saving") &&
+    report2.includes("knowledgeSource"),
   report2.slice(0, 160)
 );
 await page.screenshot({ path: `${OUT}/x2.png` });

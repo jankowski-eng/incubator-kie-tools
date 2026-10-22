@@ -601,22 +601,16 @@ defmodule DmnSpike.Editor do
   defp report_html({:error, file, msg}), do: ~s|<div class="bad"><b>#{Fmt.esc(file)}</b>: #{Fmt.esc(msg)}</div>|
 
   defp report_html({:ok, file, r}) do
-    dropped =
-      for {what, n} <- Enum.sort(r.dropped), do: "<li>#{if n > 1, do: "#{n} × "}#{Fmt.esc(what)}</li>"
-
-    converted = for {what, n} <- Enum.sort(r.converted), do: "<li>#{if n > 1, do: "#{n} × "}#{Fmt.esc(what)}</li>"
-
-    conv_html =
-      if converted == [], do: "", else: ~s| Converted: <ul class="dropped">#{converted}</ul>|
+    list = fn map -> for({what, n} <- Enum.sort(map), do: "<li>#{if n > 1, do: "#{n} × "}#{Fmt.esc(what)}</li>") |> Enum.join() end
+    section = fn title, map -> if map == %{}, do: "", else: ~s| #{title}<ul class="dropped">#{list.(map)}</ul>| end
 
     placed = if r.placed > 0, do: ", #{r.placed} placed automatically (no diagram shape)", else: ""
+    nothing = if r.kept == %{} and r.dropped == %{}, do: " Nothing was lost.", else: ""
 
-    drop_html =
-      if dropped == [],
-        do: " Nothing was dropped.",
-        else: ~s| Not supported, dropped on import:<ul class="dropped">#{dropped}</ul>|
-
-    ~s|<b>#{Fmt.esc(file)}</b>: imported #{r.nodes} nodes, #{r.edges} requirements, #{r.types} data types#{placed}.#{conv_html}#{drop_html}|
+    ~s|<b>#{Fmt.esc(file)}</b>: imported #{r.nodes} nodes, #{r.edges} requirements, #{r.types} data types#{placed}.#{nothing}| <>
+      section.("Converted for evaluation (written back as in the file until you edit them):", r.converted) <>
+      section.("Kept as in the file (not shown or editable yet):", r.kept) <>
+      section.("Lost when saving:", r.dropped)
   end
 
   defp say(state, msg) do

@@ -8,6 +8,7 @@ defmodule DmnSpike.Dmn do
   """
 
   alias DmnSpike.{Layout, Model, Svg}
+  alias DmnSpike.Dmn.Overlay
 
   @ns %{
     "xmlns" => "https://www.omg.org/spec/DMN/20240513/MODEL/",
@@ -18,12 +19,20 @@ defmodule DmnSpike.Dmn do
     "xmlns:spike" => "urn:popcorn-dmn-spike"
   }
 
+  @doc false
+  def ns_uri(prefix), do: @ns["xmlns:" <> prefix]
+
   @elements %{"inputData" => :input, "decision" => :decision, "businessKnowledgeModel" => :bkm}
   @known_top ["itemDefinition", "inputData", "decision", "businessKnowledgeModel", "DMNDI", "extensionElements", "description"]
 
   # ===================================================================== export
 
-  def to_xml(%Model{} = m, name \\ "Popcorn spike") do
+  def to_xml(m, name \\ "Popcorn spike")
+
+  # a model that came from a file is written back into that file's document
+  def to_xml(%Model{doc: doc} = m, _name) when doc != nil, do: Overlay.to_xml(m)
+
+  def to_xml(%Model{} = m, name) do
     nodes = m.nodes |> Map.values() |> Enum.sort_by(& &1.id)
 
     root =
@@ -35,12 +44,13 @@ defmodule DmnSpike.Dmn do
     ~s|<?xml version="1.0" encoding="UTF-8"?>\n| <> render(root, 0)
   end
 
-  defp item_xml(t, id) do
+  @doc false
+  def item_xml(t, id) do
     attrs = [{"id", id}, {"name", t.name}] ++ if(t.collection, do: [{"isCollection", "true"}], else: [])
 
     kids =
       if(t.ref, do: [el("typeRef", [], [t.ref])], else: []) ++
-        constraint_xml(t.constraint) ++
+        constraint_xml(t.constraint, t.collection) ++
         Enum.map(Enum.with_index(t.components), fn {c, i} -> item_xml(c, "#{id}-#{i}") |> rename("itemComponent") end)
 
     el("itemDefinition", attrs, kids)
@@ -48,15 +58,19 @@ defmodule DmnSpike.Dmn do
 
   defp rename({:el, _, attrs, kids}, tag), do: {:el, tag, attrs, kids}
 
-  defp constraint_xml(nil), do: []
-  defp constraint_xml(%{text: ""}), do: []
-  defp constraint_xml(%{kind: kind, text: text}), do: [el("typeConstraint", [{"kie:constraintType", to_string(kind)}], [el("text", [], [text])])]
+  # as the KIE editor does: allowedValues for a plain type, typeConstraint for a list
+  defp constraint_xml(nil, _), do: []
+  defp constraint_xml(%{text: ""}, _), do: []
 
-  defp node_xml(m, n) do
+  defp constraint_xml(%{kind: kind, text: text}, collection?),
+    do: [el(if(collection?, do: "typeConstraint", else: "allowedValues"), [{"kie:constraintType", to_string(kind)}], [el("text", [], [text])])]
+
+  @doc false
+  def node_xml(m, n) do
     tag = Enum.find_value(@elements, fn {t, k} -> if k == n.type, do: t end)
     var = el("variable", [{"id", "#{n.id}-var"}, {"name", n.name}] ++ if(n.type_ref, do: [{"typeRef", n.type_ref}], else: []), [])
-    info = for {from, to, :info} <- m.edges, to == n.id, do: el("informationRequirement", [{"id", req_id(from, to)}], [el(if(m.nodes[from].type == :decision, do: "requiredDecision", else: "requiredInput"), [{"href", "#" <> from}], [])])
-    know = for {from, to, :knowledge} <- m.edges, to == n.id, do: el("knowledgeRequirement", [{"id", req_id(from, to)}], [el("requiredKnowledge", [{"href", "#" <> from}], [])])
+    info = for {from, to, :info} <- m.edges, to == n.id, do: req_xml(m, from, to, :info)
+    know = for {from, to, :knowledge} <- m.edges, to == n.id, do: req_xml(m, from, to, :knowledge)
 
     body =
       case n.type do
@@ -68,7 +82,15 @@ defmodule DmnSpike.Dmn do
     el(tag, [{"id", n.id}, {"name", n.name}], [var] ++ info ++ know ++ body)
   end
 
-  defp req_id(from, to), do: "_req-#{from}-#{to}"
+  @doc false
+  def req_xml(m, from, to, :info),
+    do: el("informationRequirement", [{"id", req_id(from, to)}], [el(if(m.nodes[from].type == :decision, do: "requiredDecision", else: "requiredInput"), [{"href", "#" <> from}], [])])
+
+  def req_xml(_m, from, to, :knowledge),
+    do: el("knowledgeRequirement", [{"id", req_id(from, to)}], [el("requiredKnowledge", [{"href", "#" <> from}], [])])
+
+  @doc false
+  def req_id(from, to), do: "_req-#{from}-#{to}"
 
   defp input_ext(%{expr: %{result: ""}}), do: []
   defp input_ext(%{expr: %{result: v}}), do: [el("extensionElements", [], [el("spike:value", [], [v])])]
@@ -77,7 +99,8 @@ defmodule DmnSpike.Dmn do
 
   defp annotated?(t), do: Map.get(t, :note_title) != nil or Enum.any?(t.rules, &(Map.get(&1, :note, "") != ""))
 
-  defp expression_xml(%{kind: :table} = t) do
+  @doc false
+  def expression_xml(%{kind: :table} = t) do
     [
       el("decisionTable", [{"hitPolicy", t.hit_policy}],
         Enum.map(t.inputs, fn i -> el("input", [], [el("inputExpression", [], [el("text", [], [i.expr])])]) end) ++
@@ -96,10 +119,11 @@ defmodule DmnSpike.Dmn do
     ]
   end
 
-  defp expression_xml(%{rows: [], result: ""}), do: []
-  defp expression_xml(%{rows: [], result: text}), do: literal(text)
+  def expression_xml(%{kind: :raw}), do: []
+  def expression_xml(%{rows: [], result: ""}), do: []
+  def expression_xml(%{rows: [], result: text}), do: literal(text)
 
-  defp expression_xml(%{rows: rows, result: result}) do
+  def expression_xml(%{rows: rows, result: result}) do
     entries =
       Enum.map(rows, fn r -> el("contextEntry", [], [el("variable", [{"name", r.name}], []) | literal(r.text)]) end) ++
         [el("contextEntry", [], literal(result))]
@@ -107,7 +131,8 @@ defmodule DmnSpike.Dmn do
     [el("context", [], entries)]
   end
 
-  defp dmndi(m, nodes) do
+  @doc false
+  def dmndi(m, nodes) do
     shapes =
       for n <- nodes do
         el("dmndi:DMNShape", [{"id", "#{n.id}-shape"}, {"dmnElementRef", n.id}], [
@@ -130,9 +155,11 @@ defmodule DmnSpike.Dmn do
 
   # tiny indenting XML writer ------------------------------------------------------
 
-  defp el(tag, attrs, kids), do: {:el, tag, attrs, kids}
+  @doc false
+  def el(tag, attrs, kids), do: {:el, tag, attrs, kids}
 
-  defp render({:el, tag, attrs, kids}, depth) do
+  @doc false
+  def render({:el, tag, attrs, kids}, depth) do
     pad = String.duplicate("  ", depth)
     open = pad <> "<" <> tag <> Enum.map_join(attrs, "", fn {k, v} -> ~s| #{k}="#{esc_attr(to_string(v))}"| end)
 
@@ -152,15 +179,29 @@ defmodule DmnSpike.Dmn do
   def from_xml(xml) when is_binary(xml) do
     case Saxy.SimpleForm.parse_string(xml) do
       {:ok, {root, attrs, children}} ->
+        children = ensure_ids(children)
+
         with true <- local(root) == "definitions" || {:error, "not a DMN file: root element is <#{local(root)}>"},
              :ok <- check_ids(children) do
           {model, report} = build(attrs, children)
-          {:ok, model, report}
+          {shapes, _} = shapes(children)
+          doc = Overlay.build(xml, root, attrs, Enum.filter(children, &is_tuple/1), model, shapes)
+          {:ok, %{model | doc: doc}, report}
         end
 
       {:error, e} ->
         {:error, "XML parse error: " <> Exception.message(e)}
     end
+  end
+
+  # DRG elements without an id get one, so every element can be found again when the file is written back
+  defp ensure_ids(children) do
+    children
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {{tag, a, k}, i} -> if @elements[local(tag)] && attr(a, "id") == nil, do: {tag, a ++ [{"id", "_auto-#{i}"}], k}, else: {tag, a, k}
+      {other, _} -> other
+    end)
   end
 
   # Element ids end up in HTML attributes and CSS selectors. DMN ids are XML names, so anything
@@ -207,11 +248,13 @@ defmodule DmnSpike.Dmn do
       types: length(types),
       placed: length(missing),
       converted: merge_counts(%{}, for(n <- all_notes, String.contains?(n, ": converted: "), do: String.replace(n, ": converted: ", ": "))),
-      dropped:
+      # not shown or editable yet, but written back exactly as it was
+      kept:
         Map.merge(dropped, reqs.dropped, fn _, a, b -> a + b end)
-        |> merge_counts(for n <- all_notes, not String.contains?(n, ": converted: "), do: n)
-        |> merge_counts(if(extra_diagrams > 0, do: ["extra DMNDiagram"], else: []))
-        |> merge_counts(for {f, t, _} <- reqs.edges, !(nodes[f] && nodes[t]), do: "requirement to unknown element")
+        |> merge_counts(for n <- all_notes, String.contains?(n, ": kept: "), do: String.replace(n, ": kept: ", ": "))
+        |> merge_counts(if(extra_diagrams > 0, do: ["extra DMNDiagram"], else: [])),
+      # really lost when the file is saved
+      dropped: merge_counts(%{}, for({f, t, _} <- reqs.edges, !(nodes[f] && nodes[t]), do: "requirement to unknown element"))
     }
 
     {model, report}
@@ -313,7 +356,7 @@ defmodule DmnSpike.Dmn do
 
         {body, notes} =
           case expression(:decision, children(logic)) do
-            {%{kind: :table}, notes} -> {%{rows: [], result: ""}, ["decision table in a business knowledge model" | notes]}
+            {%{kind: :table}, notes} -> {%{kind: :raw, tag: "decisionTable"}, ["kept: decision table in a business knowledge model, read-only" | notes]}
             other -> other
           end
 
@@ -328,7 +371,7 @@ defmodule DmnSpike.Dmn do
       {:converted, t, note} -> {%{rows: [], result: t}, [note]}
       {:context, entries, notes} -> context_expr(entries, notes)
       {:table, t, notes} -> {t, notes}
-      {:other, tag} -> {%{rows: [], result: ""}, ["unsupported expression <#{tag}>"]}
+      {:other, tag} -> {%{kind: :raw, tag: tag}, ["kept: #{tag} expression, read-only"]}
     end
   end
 
@@ -391,17 +434,24 @@ defmodule DmnSpike.Dmn do
           {:literal, t} -> {t, []}
           {:converted, t, note} -> {t, [note]}
           nil -> {"", []}
-          {:other, tag} -> {"", ["unsupported context entry expression <#{tag}>"]}
-          _ -> {"", ["nested expression in context entry"]}
+          {:other, tag} -> {:raw, tag}
+          _ -> {:raw, "nested expression"}
         end
 
-        {var && attr(attrs_of(var), "name"), elem(value, 0), elem(value, 1)}
+        {var && attr(attrs_of(var), "name"), elem(value, 0), (if elem(value, 0) == :raw, do: [], else: elem(value, 1))}
       end
 
-    {named, unnamed} = Enum.split_with(parsed, fn {name, _, _} -> name != nil end)
-    result = case unnamed do [{_, t, _} | _] -> t; [] -> "" end
-    extra = Enum.flat_map(parsed, &elem(&1, 2))
-    {%{rows: Enum.map(named, fn {n, t, _} -> %{name: n, text: t} end), result: result}, notes ++ extra}
+    # a context with an entry the editor cannot edit yet is kept whole, read-only, so nothing in it is lost
+    case Enum.find(parsed, fn {_, t, _} -> t == :raw end) do
+      {_, _, _} ->
+        {%{kind: :raw, tag: "context"}, ["kept: context with an entry that cannot be edited yet, read-only"]}
+
+      nil ->
+        {named, unnamed} = Enum.split_with(parsed, fn {name, _, _} -> name != nil end)
+        result = case unnamed do [{_, t, _} | _] -> t; [] -> "" end
+        extra = Enum.flat_map(parsed, &elem(&1, 2))
+        {%{rows: Enum.map(named, fn {n, t, _} -> %{name: n, text: t} end), result: result}, notes ++ extra}
+    end
   end
 
   defp table({_, attrs, kids}) do
@@ -423,8 +473,8 @@ defmodule DmnSpike.Dmn do
     annotations = for {t, a, _} <- kids, local(t) == "annotation", do: attr(a, "name") || "Annotation"
 
     notes =
-      (if length(annotations) > 1, do: ["#{length(annotations) - 1} further annotation columns ignored"], else: []) ++
-        (if attr(attrs, "aggregation"), do: ["aggregation #{attr(attrs, "aggregation")} ignored"], else: [])
+      (if length(annotations) > 1, do: ["kept: #{length(annotations) - 1} further annotation columns, not shown (kept until the table is edited)"], else: []) ++
+        (if attr(attrs, "aggregation"), do: ["kept: aggregation #{attr(attrs, "aggregation")}, not shown (kept until the table is edited)"], else: [])
 
     {:table,
      %{
@@ -509,12 +559,17 @@ defmodule DmnSpike.Dmn do
 
   # simple-form helpers -------------------------------------------------------------------
 
-  defp local(name), do: name |> String.split(":") |> List.last()
-  defp attr(attrs, name), do: Enum.find_value(attrs, fn {k, v} -> if k == name or local(k) == name, do: v end)
-  defp children({_, _, kids}), do: Enum.filter(kids, &is_tuple/1)
-  defp children(nil), do: []
-  defp find(kids, name), do: Enum.find(kids, fn t -> is_tuple(t) and local(elem(t, 0)) == name end)
+  @doc false
+  def local(name), do: name |> String.split(":") |> List.last()
+  @doc false
+  def attr(attrs, name), do: Enum.find_value(attrs, fn {k, v} -> if k == name or local(k) == name, do: v end)
+  @doc false
+  def children({_, _, kids}), do: Enum.filter(kids, &is_tuple/1)
+  def children(nil), do: []
+  @doc false
+  def find(kids, name), do: Enum.find(kids, fn t -> is_tuple(t) and local(elem(t, 0)) == name end)
 
-  defp text(nil), do: nil
-  defp text({_, _, kids}), do: kids |> Enum.filter(&is_binary/1) |> Enum.join() |> String.trim()
+  @doc false
+  def text(nil), do: nil
+  def text({_, _, kids}), do: kids |> Enum.filter(&is_binary/1) |> Enum.join() |> String.trim()
 end

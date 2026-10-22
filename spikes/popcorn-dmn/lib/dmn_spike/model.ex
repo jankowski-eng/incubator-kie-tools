@@ -16,7 +16,7 @@ defmodule DmnSpike.Model do
     "prod" => "tRequested"
   }
 
-  defstruct nodes: %{}, edges: [], types: [], next: 1
+  defstruct nodes: %{}, edges: [], types: [], next: 1, doc: nil
 
   def sample do
     nodes =
@@ -110,10 +110,11 @@ defmodule DmnSpike.Model do
 
   def cell_count(%{expr: %{kind: :table, inputs: ins, outputs: outs, rules: rules}}),
     do: length(ins) + length(rules) * (length(ins) + length(outs))
+  def cell_count(%{expr: %{kind: :raw}}), do: 0
   def cell_count(node), do: length(cells(node))
 
-  @doc "Cells of a context/literal node: `{label, text}`; the last has label `:result`. Tables have none."
-  def cells(%{expr: %{kind: :table}}), do: []
+  @doc "Cells of a context/literal node: `{label, text}`; the last has label `:result`. Tables and kept (read-only) expressions have none."
+  def cells(%{expr: %{kind: kind}}) when kind in [:table, :raw], do: []
 
   def cells(%{expr: %{rows: rows, result: result}}),
     do: Enum.map(rows, &{&1.name, &1.text}) ++ [{:result, result}]

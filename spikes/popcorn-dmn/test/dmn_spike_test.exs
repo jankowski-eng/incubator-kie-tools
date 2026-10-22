@@ -242,7 +242,7 @@ defmodule DmnSpikeTest do
       assert {:ok, {"definitions", _, _}} = Saxy.SimpleForm.parse_string(xml)
       assert xml =~ ~s|<decision id="risk" name="Risk Category">|
       assert xml =~ ~s|<decisionTable hitPolicy="FIRST">|
-      assert xml =~ ~s|<typeConstraint kie:constraintType="range">|
+      assert xml =~ ~s|<allowedValues kie:constraintType="range">|
       assert xml =~ ~s|<requiredInput href="#app"/>|
       assert xml =~ ~s|<requiredKnowledge href="#dti"/>|
       assert xml =~ ~s|<dc:Bounds x=|
@@ -257,9 +257,9 @@ defmodule DmnSpikeTest do
       assert m.nodes["_app"].type_ref == "tApplicant" and m.nodes["_back"].type == :decision
       assert {"_app", "_back", :info} in m.edges and {"_back", "_risk", :info} in m.edges and {"_dti", "_loan_d", :knowledge} in m.edges
       assert length(m.edges) == 6
-      assert r.dropped["knowledgeSource"] == 1 and r.dropped["textAnnotation"] == 1 and r.dropped["association"] == 1
-      assert r.dropped["authorityRequirement"] == 1
-      assert r.dropped |> Map.keys() |> Enum.all?(&(not String.contains?(&1, "invocation")))
+      assert r.kept["knowledgeSource"] == 1 and r.kept["textAnnotation"] == 1 and r.kept["association"] == 1
+      assert r.kept["authorityRequirement"] == 1
+      assert r.dropped == %{}
       assert r.converted == %{"Fee: invocation to a FEEL function call" => 1}
       assert m.nodes["_fee"].expr.result == "feeFunction()"
       assert r.placed == 1 and m.nodes["_fee"].y > m.nodes["_app"].y, "the Fee decision has no DMNShape, so it is placed below the rest"
@@ -377,7 +377,7 @@ defmodule DmnSpikeTest do
     test "imports every element", %{m: m, r: r} do
       assert {r.nodes, r.edges, r.types, r.placed} == {11, 11, 16, 0}
       assert m.nodes |> Map.values() |> Enum.frequencies_by(& &1.type) == %{input: 3, decision: 4, bkm: 4}
-      assert r.dropped == %{}, "nothing in the real sample should be dropped"
+      assert r.dropped == %{} and r.kept == %{}, "nothing in the real sample is lost or merely kept"
       assert r.converted == %{"Back End Ratio: invocation to a FEEL function call" => 1, "Front End Ratio: invocation to a FEEL function call" => 1}
     end
 
@@ -410,7 +410,8 @@ defmodule DmnSpikeTest do
     test "export then import is lossless for everything it imported", %{m: m, r: r} do
       {:ok, m2, r2} = Dmn.from_xml(Dmn.to_xml(m, r.name))
       assert m2.nodes == m.nodes and Enum.sort(m2.edges) == Enum.sort(m.edges) and m2.types == m.types
-      assert r2.dropped == %{} and r2.converted == %{}
+      assert r2.dropped == %{} and r2.kept == %{}
+      assert r2.converted == r.converted, "the invocations are kept as they were, so they are converted again on re-import"
     end
   end
 
@@ -463,6 +464,138 @@ defmodule DmnSpikeTest do
       assert new == ~s|"😀" = Front End Ratio + 1|
       assert new_caret == Autocomplete.utf16_length(~s|"😀" = Front End Ratio|)
       assert String.slice(new, 0..-5//1) |> String.ends_with?("Front End Ratio")
+    end
+  end
+
+  describe "a file survives being opened and saved" do
+    alias DmnSpike.Dmn
+
+    # canonical form: no whitespace-only text, trimmed text, sorted attributes
+    defp canon({tag, attrs, kids}) do
+      kids = for k <- kids, not (is_binary(k) and String.trim(k) == ""), do: if(is_binary(k), do: String.trim(k), else: canon(k))
+      {tag, Enum.sort(attrs), kids}
+    end
+
+    defp parse!(xml), do: xml |> Saxy.SimpleForm.parse_string() |> elem(1) |> canon()
+    defp elements(xml), do: Regex.scan(~r/<[A-Za-z][^>\s\/]*/, xml) |> Enum.frequencies_by(fn [t] -> t |> String.trim_leading("<") |> String.split(":") |> List.last() end)
+    defp import!(file), do: Dmn.from_xml(File.read!(file)) |> then(fn {:ok, m, _} -> m end)
+    defp find_all(xml, local), do: Regex.scan(~r/<(?:\w+:)?#{local}\b[^>]*>/, xml) |> Enum.map(&hd/1)
+
+    for file <- ["test/fixtures/Sample.dmn", "test/fixtures/kie_sample.dmn"] do
+      test "#{file}: opening and saving without edits gives back the same document" do
+        xml = File.read!(unquote(file))
+        out = Dmn.to_xml(import!(unquote(file)))
+        assert parse!(out) == parse!(xml)
+      end
+    end
+
+    test "the licence header before the root element is kept" do
+      out = Dmn.to_xml(import!("test/fixtures/Sample.dmn"))
+      assert out =~ "Licensed to the Apache Software Foundation"
+      assert String.starts_with?(out, ~s|<?xml version="1.0" encoding="UTF-8"?>\n<!--|)
+    end
+
+    test "moving a node changes only its bounds and its edges' waypoints" do
+      m = import!("test/fixtures/Sample.dmn")
+      id = Enum.find_value(m.nodes, fn {i, n} -> if n.name == "Front End Ratio", do: i end)
+      out = m |> Model.move(id, 900, 40) |> Dmn.to_xml()
+      assert elements(out) == elements(File.read!("test/fixtures/Sample.dmn")), "same elements, nothing added or lost"
+      assert out =~ ~s|x="900"|
+      assert find_all(out, "DMNStyle") |> length() == 11, "the diagram's styles survive"
+      assert find_all(out, "DMNLabel") |> length() == 11
+      {:ok, m2, _} = Dmn.from_xml(out)
+      assert m2.nodes[id].x == 900 and m2.nodes[id].y == 40
+    end
+
+    test "renaming keeps ids, extension elements, requirements and prefixes" do
+      m = import!("test/fixtures/Sample.dmn")
+      id = Enum.find_value(m.nodes, fn {i, n} -> if n.name == "Credit Score Rating", do: i end)
+      out = m |> Model.rename(id, "Score Band") |> Dmn.to_xml()
+      assert out =~ ~s|<dmn:decision id="#{id}" name="Score Band">|
+      assert elements(out) == elements(File.read!("test/fixtures/Sample.dmn"))
+      assert out =~ ~r/<dmn:informationRequirement id="_[0-9A-F-]+">/
+      refute out =~ "<decision "
+    end
+
+    test "editing one expression leaves every other element exactly as it was" do
+      m = import!("test/fixtures/Sample.dmn")
+      id = Enum.find_value(m.nodes, fn {i, n} -> if n.name == "Back End Ratio", do: i end)
+      before = File.read!("test/fixtures/Sample.dmn") |> Saxy.SimpleForm.parse_string() |> elem(1) |> canon()
+      out = m |> Model.set_text(id, 0, "(Applicant Data.Monthly.Repayments) + 1") |> Dmn.to_xml()
+      {_, _, kids_in} = before
+      {_, _, kids_out} = parse!(out)
+      differing = for {a, b} <- Enum.zip(kids_in, kids_out), a != b, do: elem(a, 0)
+      assert differing == ["dmn:decision"], "only the edited decision differs (the diagram is unchanged too)"
+      assert out =~ "Applicant Data.Monthly.Repayments) + 1"
+    end
+
+    test "new elements are written in the file's own prefixes and appear in the diagram" do
+      m = import!("test/fixtures/Sample.dmn")
+      {m, id} = Model.add_node(m, "decision", 700, 20)
+      app = Enum.find_value(m.nodes, fn {i, n} -> if n.name == "Applicant Data", do: i end)
+      {:ok, m} = Model.connect(m, app, id)
+      out = Dmn.to_xml(m)
+      assert out =~ ~s|<dmn:decision id="#{id}" name="New decision">|
+      assert out =~ ~s|<dmndi:DMNShape id="dmnshape-drg-#{id}"|
+      assert out =~ "<dc:Bounds"
+      refute out =~ "<decision ", "no unprefixed DMN elements in a prefixed file"
+      {:ok, m2, _} = Dmn.from_xml(out)
+      assert m2.nodes[id].name == "New decision" and {app, id, :info} in m2.edges
+    end
+
+    test "deleting a node removes its shape and edges and leaves no dangling reference" do
+      m = import!("test/fixtures/Sample.dmn")
+      id = Enum.find_value(m.nodes, fn {i, n} -> if n.name == "Front End Ratio", do: i end)
+      out = m |> Model.delete_node(id) |> Dmn.to_xml()
+      refute out =~ ~s|dmnElementRef="#{id}"|
+      ids = Regex.scan(~r/\bid="([^"]+)"/, out) |> Enum.map(&List.last/1) |> MapSet.new()
+      refs = Regex.scan(~r/dmnElementRef="([^"]+)"/, out) |> Enum.map(&List.last/1)
+      assert Enum.all?(refs, &MapSet.member?(ids, &1)), "every dmnElementRef points at an element that exists"
+      assert {:ok, _, _} = Dmn.from_xml(out)
+    end
+
+    test "types are kept untouched until edited, then regenerated without losing their attributes" do
+      m = import!("test/fixtures/Sample.dmn")
+      unchanged = Dmn.to_xml(m)
+      assert unchanged == Dmn.to_xml(import!("test/fixtures/Sample.dmn"))
+      t = Types.find(m, "Requested_Product")
+      i = Enum.find_index(m.types, &(&1.name == "Requested_Product"))
+      m = %{m | types: List.replace_at(m.types, i, %{t | components: tl(t.components)})}
+      out = Dmn.to_xml(m)
+      assert out =~ ~s|<dmn:itemDefinition id=|
+      assert elements(out)["itemComponent"] == elements(unchanged)["itemComponent"] - 1
+    end
+
+    test "an expression the editor cannot edit is kept, shown read-only, and survives edits elsewhere" do
+      xml = dmn(~s|<decision id="rel" name="Relation"><variable name="Relation"/><relation id="r1"><column name="a"/><row><literalExpression><text>1</text></literalExpression></row></relation></decision><decision id="d2" name="Other"><variable name="Other"/><literalExpression><text>1</text></literalExpression></decision>|)
+      {:ok, m, r} = Dmn.from_xml(xml)
+      assert m.nodes["rel"].expr == %{kind: :raw, tag: "relation"}
+      assert r.kept == %{"Relation: relation expression, read-only" => 1}
+      assert Eval.run(m)["rel"].value == nil
+      assert parse!(Dmn.to_xml(m)) == parse!(xml)
+      out = m |> Model.set_text("d2", 0, "2") |> Dmn.to_xml()
+      assert out =~ "<relation id=\"r1\">" and out =~ "<column name=\"a\"/>"
+      # replacing the kind drops the old expression
+      out2 = m |> Model.set_expr_kind("rel", :context) |> Dmn.to_xml()
+      refute out2 =~ "<relation"
+    end
+
+    test "unknown attributes and elements on an edited element are kept" do
+      xml = dmn(~s|<decision id="d" name="Old" kie:custom="yes" xmlns:kie="http://www.drools.org/kie/dmn/1.2"><description>why</description><variable id="v" name="Old" typeRef="number"/><literalExpression id="le"><text>1</text></literalExpression></decision>|)
+      {:ok, m, _} = Dmn.from_xml(xml)
+      out = m |> Model.rename("d", "New") |> Dmn.to_xml()
+      assert out =~ ~s|kie:custom="yes"|
+      assert out =~ "<description>why</description>"
+      assert out =~ ~s|<variable id="v" name="New" typeRef="number"/>|
+      # DMN's child order is kept: description before variable before the expression
+      assert Regex.match?(~r/<description>.*<variable.*<literalExpression/s, out)
+    end
+
+    test "a DRG element without an id gets one" do
+      {:ok, m, _} = Dmn.from_xml(dmn(~s|<decision name="NoId"><variable name="NoId"/></decision>|))
+      [id] = Map.keys(m.nodes)
+      assert String.starts_with?(id, "_auto-")
+      assert Dmn.to_xml(m) =~ ~s|id="#{id}"|
     end
   end
 end

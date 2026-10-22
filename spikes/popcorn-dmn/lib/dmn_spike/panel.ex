@@ -13,9 +13,18 @@ defmodule DmnSpike.Panel do
       case Model.kind(node) do
         :table -> table(node, results[id])
         :context -> context(node, results[id])
+        :raw -> raw(node)
       end
 
     IO.iodata_to_binary([head, body])
+  end
+
+  # an expression kind the editor cannot edit yet: shown, written back exactly as in the file
+  defp raw(node) do
+    [
+      ~s|<p class="hint">This expression is a <b>#{Fmt.esc(node.expr.tag)}</b>. The editor cannot edit it yet, so it is kept exactly as it is in the file. |,
+      ~s|Choose another expression type above to replace it.</p>|
+    ]
   end
 
   defp context(node, result) do
@@ -145,7 +154,7 @@ defmodule DmnSpike.Panel do
         do: ~s|<label>parameters <input class="params" data-op="nparams" data-id="#{node.id}" value="#{Fmt.esc(Enum.join(Model.params(node), ", "))}" placeholder="none" spellcheck="false"/></label>|,
         else: ""
       ),
-      ~s|<label>expression <select data-op="nexpr" data-id="#{node.id}"><option value="context"#{if Model.kind(node) == :context, do: " selected"}>literal / context</option><option value="table"#{if Model.kind(node) == :table, do: " selected"}>decision table</option></select></label>|,
+      ~s|<label>expression <select data-op="nexpr" data-id="#{node.id}"><option value="context"#{if Model.kind(node) == :context, do: " selected"}>literal / context</option><option value="table"#{if Model.kind(node) == :table, do: " selected"}>decision table</option>#{if Model.kind(node) == :raw, do: ~s|<option value="raw" selected disabled>#{Fmt.esc(node.expr.tag)} (kept, read-only)</option>|}</select></label>|,
       ~s|<span class="errs" id="nerr-#{node.id}">#{errors_html(result)}</span></div>|
     ]
     |> IO.iodata_to_binary()
