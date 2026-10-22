@@ -98,8 +98,43 @@ defmodule DmnSpike.Svg do
       ~s|<text id="nv-#{n.id}" class="nv" x="#{div(n.w, 2)}" y="45" text-anchor="middle" font-size="12">#{Fmt.esc(node_value_text(result))}</text>|,
       ~s|<g class="handle" data-handle="#{n.id}" transform="translate(#{div(n.w, 2)} 0)"><title>Drag onto a node that needs this one</title><circle r="10"/><path d="M0 4V-4M-3.5 -1L0 -4.5L3.5 -1"/></g>|,
       ~s|<g class="del" data-del="#{n.id}" transform="translate(#{n.w} 0)"><title>Delete (Del)</title><circle r="9"/><path d="M-3 -3L3 3M3 -3L-3 3"/></g>|,
+      ~s|<g id="pad-#{n.id}">#{if n.id == selected, do: pad(n)}</g>|,
       "</g>"
     ]
+  end
+
+  @icons %{
+    "decision" => ~s|<rect x="-8" y="-6" width="16" height="12" rx="2"/>|,
+    "input" => ~s|<rect x="-9" y="-6" width="18" height="12" rx="6"/>|,
+    "bkm" => ~s|<path d="M-9 -2L-5 -6H9V6H-9Z" stroke-linejoin="round"/>|
+  }
+  @labels %{"decision" => "decision", "input" => "input data", "bkm" => "business knowledge"}
+
+  @doc "Everything that floats around a selected node: its data type and create-and-connect buttons."
+  def pad(n), do: [type_pill(n), create_buttons(n)] |> IO.iodata_to_binary()
+
+  defp type_pill(n) do
+    label = n.type_ref || "no type"
+    w = 36 + round(String.length(label) * 7.2)
+
+    ~s|<g class="tpill#{if n.type_ref == nil, do: " none"}" data-typepill="#{n.id}" transform="translate(0 -40)"><title>Data type: click to change</title><rect width="#{w}" height="24" rx="12"/><text x="12" y="16" font-size="11.5">#{Fmt.esc(label)}</text><path d="M#{w - 18} 10l4 4l4 -4" /></g>|
+  end
+
+  defp create_buttons(n) do
+    case Model.required_kinds(n.type) do
+      [] ->
+        ""
+
+      kinds ->
+        w = 8 + 30 * length(kinds)
+
+        buttons =
+          for {k, i} <- Enum.with_index(kinds) do
+            ~s|<g class="mk" data-create="#{k}" transform="translate(#{19 + 30 * i} 16)"><title>Add #{@labels[k]} this requires</title><rect class="hit" x="-15" y="-15" width="30" height="30" rx="8"/>#{@icons[k]}</g>|
+          end
+
+        ~s|<g class="pad" transform="translate(#{n.w + 16} #{div(n.h - 32, 2)})"><rect class="bg" width="#{w}" height="32" rx="16"/>#{buttons}</g>|
+    end
   end
 
   defp shape(%{type: :decision} = n), do: ~s|<rect class="shape decision" width="#{n.w}" height="#{n.h}" rx="5"/>|

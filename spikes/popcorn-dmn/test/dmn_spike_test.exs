@@ -153,6 +153,32 @@ defmodule DmnSpikeTest do
       refute Map.has_key?(m.nodes, "front")
       assert Enum.all?(m.edges, fn {a, b, _} -> a != "front" and b != "front" end)
     end
+
+    test "add_required creates a node the target requires, without overlapping another" do
+      m = Model.sample()
+      assert Model.required_kinds(:decision) == ["bkm", "decision", "input"]
+      assert Model.required_kinds(:bkm) == ["bkm"]
+      assert Model.required_kinds(:input) == []
+
+      {:ok, m, id} = Model.add_required(m, "front", "input")
+      assert {id, "front", :info} in m.edges
+      n = m.nodes[id]
+      assert n.type == :input
+
+      refute Enum.any?(m.nodes, fn {k, o} ->
+               k != id and n.x < o.x + o.w and o.x < n.x + n.w and n.y < o.y + o.h and o.y < n.y + n.h
+             end)
+
+      # a second one lands somewhere else
+      {:ok, m, id2} = Model.add_required(m, "front", "input")
+      assert {m.nodes[id2].x, m.nodes[id2].y} != {n.x, n.y}
+
+      {:ok, m, bkm} = Model.add_required(m, "front", "bkm")
+      assert {bkm, "front", :knowledge} in m.edges
+
+      assert {:error, _} = Model.add_required(m, "app", "decision")
+      assert {:error, _} = Model.add_required(m, "dti", "decision")
+    end
   end
 
   describe "auto layout" do

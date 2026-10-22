@@ -895,8 +895,9 @@
         box-shadow: 0 2px 8px var(--shadow);
       }
       #palette .pal {
-        padding: 0.32rem 0.6rem;
-        font-size: 12px;
+        width: 42px;
+        height: 28px;
+        padding: 0;
       }
       .zoomctl #help-btn {
         font-weight: 650;
@@ -1101,6 +1102,56 @@
           position: static;
         }
       }
+
+      /* create-and-connect pad beside the selected node */
+      .node .pad .bg {
+        fill: var(--surface);
+        stroke: var(--border-strong);
+        filter: drop-shadow(0 2px 6px var(--shadow));
+      }
+      .node .pad .mk {
+        cursor: pointer;
+      }
+      .node .pad .mk .hit {
+        fill: transparent;
+      }
+      .node .pad .mk:hover .hit {
+        fill: var(--accent-soft);
+      }
+      .node .pad .mk > :not(.hit):not(title) {
+        fill: none;
+        stroke: var(--text);
+        stroke-width: 1.6;
+      }
+
+      /* data type pill above the selected node */
+      .node .tpill {
+        cursor: pointer;
+      }
+      .node .tpill rect {
+        fill: var(--surface);
+        stroke: var(--border-strong);
+        filter: drop-shadow(0 2px 6px var(--shadow));
+      }
+      .node .tpill:hover rect {
+        stroke: var(--accent);
+      }
+      .node .tpill text {
+        fill: var(--text);
+        font-family: var(--mono);
+        pointer-events: none;
+      }
+      .node .tpill.none text {
+        fill: var(--muted);
+        font-family: var(--font);
+      }
+      .node .tpill path {
+        fill: none;
+        stroke: var(--muted);
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
     </style>
   </head>
   <body>
@@ -1133,16 +1184,28 @@
     <main class="main">
       <section id="view-editor" class="workspace">
         <div class="stage">
-          <div id="palette" title="Drag onto the canvas">
-            <div class="pal decision" draggable="true" data-kind="decision" title="Decision: drag onto the canvas">
-              Decision
-            </div>
-            <div class="pal input" draggable="true" data-kind="input" title="Input data: drag onto the canvas">
-              Input data
-            </div>
-            <div class="pal bkm" draggable="true" data-kind="bkm" title="Business knowledge: drag onto the canvas">
-              Business knowledge
-            </div>
+          <div id="palette" role="toolbar" aria-label="Add elements">
+            <div
+              class="pal decision"
+              draggable="true"
+              data-kind="decision"
+              title="Decision: drag onto the canvas"
+              aria-label="Decision"
+            ></div>
+            <div
+              class="pal input"
+              draggable="true"
+              data-kind="input"
+              title="Input data: drag onto the canvas"
+              aria-label="Input data"
+            ></div>
+            <div
+              class="pal bkm"
+              draggable="true"
+              data-kind="bkm"
+              title="Business knowledge: drag onto the canvas"
+              aria-label="Business knowledge"
+            ></div>
           </div>
           <div class="zoomctl">
             <button data-click="zoom-in" title="Zoom in">+</button

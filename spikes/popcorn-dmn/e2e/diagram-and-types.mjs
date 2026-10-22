@@ -221,6 +221,9 @@ await settle(400);
 ok("cycle rejected", (await text("#status")).includes("cycle"), await text("#status"));
 
 // ---------- delete edge, delete node
+// the selected node's pad floats over nearby edges, so select a far-away node first
+await page.locator('[data-id="app"]').click();
+await settle(300);
 const eb = await page.locator("#scene #edge-9 line.hit").boundingBox();
 await page.mouse.click(eb.x + eb.width / 2, eb.y + eb.height / 2);
 await settle(300);

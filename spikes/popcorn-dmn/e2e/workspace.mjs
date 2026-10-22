@@ -14,6 +14,7 @@ const ok = (name, cond, extra = "") => {
 };
 const settle = (ms = 400) => page.waitForTimeout(ms);
 const count = (sel) => page.locator(sel).count();
+const text = (sel) => page.locator(sel).first().textContent();
 
 await page.goto("http://localhost:4000");
 await page.waitForFunction(
@@ -78,6 +79,46 @@ ok("the × badge deletes the selected node", (await count("#scene g[data-id]")) 
 await page.locator("[data-click=undo]").click();
 await settle(600);
 ok("undo brings it back", (await count("#scene g[data-id]")) === n0);
+
+// create-and-connect pad
+await page.locator('#scene g[data-id="front"]').click();
+await settle();
+ok("a selected decision offers 3 things to create", (await count("#pad-front [data-create]")) === 3);
+const nn = await count("#scene g[data-id]"),
+  ne = await count("#scene line.vis");
+await page.locator('#pad-front [data-create="input"]').click();
+await settle(800);
+ok(
+  "creating adds a connected node",
+  (await count("#scene g[data-id]")) === nn + 1 && (await count("#scene line.vis")) === ne + 1
+);
+ok(
+  "the new node is selected with its name focused",
+  (await page.locator(".node.sel .nm, .node.sel").count()) === 1 &&
+    (await page.evaluate(() => document.activeElement?.classList.contains("nname")))
+);
+ok("an input data node offers nothing to create", (await count(".node.sel [data-create]")) === 0);
+ok("the old pad is gone", (await count("#pad-front [data-create]")) === 0);
+await page.locator("[data-click=undo]").click();
+await settle(600);
+ok("undo removes node and edge", (await count("#scene g[data-id]")) === nn && (await count("#scene line.vis")) === ne);
+await page.locator('#scene g[data-id="dti"]').click();
+await settle();
+ok("a business knowledge model can only require another", (await count("#pad-dti [data-create]")) === 1);
+
+// type pill
+await page.locator('#scene g[data-id="front"]').click();
+await settle();
+ok("selected node shows its data type", (await text("#scene g[data-id=front] .tpill text")) === "tRatio");
+await page.locator("#scene g[data-id=front] .tpill").click();
+await settle();
+ok("clicking it focuses the type field", await page.evaluate(() => document.activeElement?.dataset.op === "ntype"));
+await page.locator("select[data-op=ntype]").selectOption("tVerdict");
+await settle(500);
+ok("changing the type updates the pill", (await text("#scene g[data-id=front] .tpill text")) === "tVerdict");
+await page.locator("[data-click=undo]").click();
+await settle(500);
+ok("undo restores it", (await text("#scene g[data-id=front] .tpill text")) === "tRatio");
 
 // Enter moves down a decision-table column
 await page.locator('#scene g[data-id="risk"]').click();

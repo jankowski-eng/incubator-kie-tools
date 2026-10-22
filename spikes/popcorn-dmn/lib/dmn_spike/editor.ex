@@ -20,7 +20,7 @@ defmodule DmnSpike.Editor do
       else if (k === 'attr') el.setAttribute(a, b);
       else if (k === 'disabled') el.disabled = a;
       else if (k === 'hidden') el.hidden = a;
-      else if (k === 'focus') { el.focus(); el.select(); }
+      else if (k === 'focus') { el.focus(); el.select?.(); }
       else if (k === 'value') { el.value = a; el.setSelectionRange(b, b); el.focus(); }
     }
   }
@@ -52,7 +52,10 @@ defmodule DmnSpike.Editor do
     svg.addEventListener('wheel', (e) => { e.preventDefault(); const p = at(e); ed({t: 'zoom', f: Math.exp(e.deltaY * 0.0015), x: p.x, y: p.y}); }, {passive: false});
     svg.addEventListener('pointerdown', (e) => {
       const h = e.target.closest('[data-handle]'), g = e.target.closest('[data-id]'), l = e.target.closest('[data-edge]');
-      if (e.target.closest('[data-del]')) ed({t: 'delete'});
+      const mk = e.target.closest('[data-create]');
+      if (mk) ed({t: 'create', kind: mk.dataset.create});
+      else if (e.target.closest('[data-typepill]')) ed({t: 'focus_type'});
+      else if (e.target.closest('[data-del]')) ed({t: 'delete'});
       else if (h) { mode = 'connect'; svg.setPointerCapture(e.pointerId); ed({t: 'cstart', id: h.dataset.handle}); }
       else if (g) { mode = 'drag'; svg.setPointerCapture(e.pointerId); const p = at(e); ed({t: 'down', id: g.dataset.id, x: p.x, y: p.y}); }
       else if (l) ed({t: 'edge', i: Number(l.dataset.edge)});
@@ -286,6 +289,19 @@ defmodule DmnSpike.Editor do
     render_all(%{state | model: model, selected: id, sel_edge: nil}, true)
   end
 
+  defp event(%{"t" => "create", "kind" => kind}, %{selected: id} = state) when id != nil do
+    case Model.add_required(state.model, id, kind) do
+      {:ok, model, new} ->
+        state = push_history(state, nil)
+        state = render_all(%{state | model: model, selected: new, sel_edge: nil}, true)
+        patch([["focus", "#panel .nname"]])
+        state
+
+      {:error, msg} ->
+        say(state, msg)
+    end
+  end
+
   defp event(%{"t" => "delete"}, %{sel_edge: i} = state) when i != nil do
     state
     |> push_history(nil)
@@ -300,6 +316,11 @@ defmodule DmnSpike.Editor do
     |> Map.update!(:model, &Model.delete_node(&1, id))
     |> Map.put(:selected, nil)
     |> render_all(true)
+  end
+
+  defp event(%{"t" => "focus_type"}, state) do
+    patch([["focus", "#panel select[data-op=ntype]"]])
+    state
   end
 
   defp event(%{"t" => "rename"}, state) do
@@ -424,7 +445,7 @@ defmodule DmnSpike.Editor do
   defp event(%{"t" => "op", "op" => "ntype", "id" => id, "value" => v}, state) do
     state = push_history(state, nil)
     state = %{state | model: Model.set_type_ref(state.model, id, if(v == "", do: nil, else: v))}
-    patch(refresh_ops(state))
+    patch([["html", "#pad-#{id}", Svg.pad(state.model.nodes[id])] | refresh_ops(state)])
     state
   end
 
@@ -579,6 +600,7 @@ defmodule DmnSpike.Editor do
           {%{state | selected: id, sel_edge: nil},
            [
              ["attr", ~s|[data-id="#{id}"]|, "class", Svg.node_class(true, results[id].errors != [])],
+             ["html", "#pad-#{id}", Svg.pad(state.model.nodes[id])],
              ["html", "#panel", Panel.render(state.model, id, results)]
            ]}
 
@@ -599,7 +621,8 @@ defmodule DmnSpike.Editor do
             ~s|[data-id="#{state.selected}"]|,
             "class",
             Svg.node_class(false, results[state.selected].errors != [])
-          ]
+          ],
+          ["html", "#pad-#{state.selected}", ""]
         ],
         else: []
 

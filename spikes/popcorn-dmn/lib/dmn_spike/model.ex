@@ -259,6 +259,39 @@ defmodule DmnSpike.Model do
     {%{m | nodes: Map.put(m.nodes, id, node), next: n + 1}, id}
   end
 
+  @doc "Kinds that can be created as a requirement of a node of `type` (empty when it can require nothing)."
+  def required_kinds(type), do: for({kind, {t, _}} <- Enum.sort(@kinds), valid_pair?(t, type), do: kind)
+
+  @doc """
+  Adds a node of `kind` that `to` requires and connects it. Decisions and inputs go below `to`,
+  business knowledge beside it; the first spot that overlaps no node is used.
+  """
+  def add_required(%__MODULE__{} = m, to, kind) do
+    target = m.nodes[to]
+
+    if target && kind in required_kinds(target.type) do
+      {m, id} = add_node(m, kind, 0, 0)
+      {x, y} = free_spot(m, id, target, kind)
+      m = put_in(m.nodes[id], %{m.nodes[id] | x: x, y: y})
+      {:ok, m} = connect(m, id, to)
+      {:ok, m, id}
+    else
+      {:error, "#{kind} cannot be required by that node"}
+    end
+  end
+
+  defp free_spot(m, id, target, kind) do
+    others = for {k, n} <- m.nodes, k != id, do: n
+    {ks, dy} = if kind == "bkm", do: {[1, -1, 2, -2, 3, -3], 0}, else: {[0, 1, -1, 2, -2, 3, -3], target.h + 80}
+
+    ks
+    |> Enum.map(&{target.x + &1 * 190, target.y + dy})
+    |> Enum.find(fn {x, y} -> not Enum.any?(others, &overlaps?(&1, x, y, 150, 60)) end)
+    |> Kernel.||({target.x, target.y + dy + 100})
+  end
+
+  defp overlaps?(n, x, y, w, h), do: x < n.x + n.w + 20 and n.x < x + w + 20 and y < n.y + n.h + 20 and n.y < y + h + 20
+
   def delete_node(%__MODULE__{} = m, id) do
     %{m | nodes: Map.delete(m.nodes, id), edges: Enum.reject(m.edges, fn {a, b, _} -> a == id or b == id end)}
   end
