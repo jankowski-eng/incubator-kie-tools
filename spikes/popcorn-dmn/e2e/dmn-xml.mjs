@@ -98,23 +98,21 @@ await settle(900);
 const report = await text("#report");
 ok(
   "fixture imports: 6 nodes, 6 requirements, 3 types",
-  (await count("#scene g[data-id]")) === 6 &&
-    (await count("#scene line.vis")) === 6 &&
-    report.includes("imported 6 nodes, 6 requirements, 3 data types"),
+  (await count("#scene g[data-id]")) === 7 &&
+    (await count("#scene line.vis")) === 7 &&
+    report.includes("imported 6 nodes, 6 requirements, 3 data types, 1 annotation"),
   report.slice(0, 160)
 );
 ok(
   "report lists what is kept as in the file",
-  [
-    "knowledgeSource",
-    "textAnnotation",
-    "association",
-    "authorityRequirement",
-    "Fee: invocation to a FEEL function call",
-  ].every((k) => report.includes(k)),
+  ["knowledgeSource", "authorityRequirement", "Fee: invocation to a FEEL function call"].every((k) =>
+    report.includes(k)
+  ) &&
+    !report.includes("textAnnotation") &&
+    !report.includes("association"),
   report
 );
-ok("shapeless element placed automatically", report.includes("1 placed automatically"));
+ok("shapeless elements placed automatically", report.includes("2 placed automatically"));
 ok(
   "file positions are kept (Applicant Data at 40,320)",
   (await page.locator('#scene [data-id="_app"]').getAttribute("transform")) === "translate(40 320)",

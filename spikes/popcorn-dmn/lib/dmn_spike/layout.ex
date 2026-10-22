@@ -11,9 +11,31 @@ defmodule DmnSpike.Layout do
   @gap_y 70
   @margin 30
 
-  def run(%Model{nodes: nodes} = m) when map_size(nodes) == 0, do: m
-
+  @doc """
+  Lays out the decision graph. Annotations and sources follow the node they are linked to; groups stay
+  where they are (move them by hand).
+  """
   def run(%Model{} = m) do
+    {drg, rest} = m.nodes |> Map.split_with(fn {_, n} -> not Model.artifact?(n) end)
+    laid = layout(%{m | nodes: drg})
+
+    moved =
+      for {id, n} <- rest, n.type != :group, into: %{} do
+        {other, dx, dy} =
+          Enum.find_value(m.links, {nil, 0, 0}, fn {a, b, _} ->
+            o = if a == id, do: b, else: if(b == id, do: a, else: nil)
+            if o && drg[o], do: {o, laid.nodes[o].x - drg[o].x, laid.nodes[o].y - drg[o].y}
+          end)
+
+        {id, if(other, do: %{n | x: n.x + dx, y: n.y + dy}, else: n)}
+      end
+
+    %{laid | nodes: laid.nodes |> Map.merge(rest) |> Map.merge(moved)}
+  end
+
+  defp layout(%Model{nodes: nodes} = m) when map_size(nodes) == 0, do: m
+
+  defp layout(%Model{} = m) do
     layer = layers(m)
     by_layer = layer |> Enum.group_by(fn {_, l} -> l end, fn {id, _} -> id end)
     depth = by_layer |> Map.keys() |> Enum.max()

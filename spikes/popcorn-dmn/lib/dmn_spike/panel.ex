@@ -9,6 +9,31 @@ defmodule DmnSpike.Panel do
 
   def render(%Model{} = m, id, results, dock) do
     node = m.nodes[id]
+    if Model.artifact?(node), do: artifact(m, node), else: render_drg(m, node, results, dock)
+  end
+
+  # annotations (and later sources and groups): a text field, no expression
+  defp artifact(m, %{type: :annotation} = node) do
+    linked = Model.links_of(m, node.id)
+
+    ~s|<div class="props single"><label class="desc">Annotation text<textarea class="nname" data-op="nname" data-id="#{node.id}" rows="4" placeholder="Write a note about this diagram" spellcheck="true">#{Fmt.esc(node.name)}</textarea></label>| <>
+      ~s|<dl><dt>Describes</dt><dd>#{chips(linked, "No element yet. Drag from the blue handle to one.")}</dd></dl></div>|
+  end
+
+  defp chips([], none), do: ~s|<span class="none">#{none}</span>|
+
+  defp chips(list, _none),
+    do:
+      Enum.map_join(
+        list,
+        " ",
+        fn {id, name, kind} ->
+          ~s|<button class="chip #{kind}" data-click="goto:#{id}" title="#{kind}">#{Fmt.esc(name)}</button>|
+        end
+      )
+
+  defp render_drg(%Model{} = m, node, results, dock) do
+    id = node.id
 
     body =
       cond do
@@ -38,20 +63,13 @@ defmodule DmnSpike.Panel do
   defp props(m, node) do
     {requires, required_by} = Model.neighbours(m, node.id)
 
-    chips = fn
-      [] ->
-        ~s|<span class="none">none</span>|
-
-      list ->
-        Enum.map_join(list, " ", fn {id, name, kind} ->
-          ~s|<button class="chip #{kind}" data-click="goto:#{id}" title="#{kind} requirement">#{Fmt.esc(name)}</button>|
-        end)
-    end
+    chips = &chips(&1, "none")
+    linked = Model.links_of(m, node.id)
 
     [
       ~s|<div class="props"><label class="desc">Description<textarea data-op="ndesc" data-id="#{node.id}" rows="4" placeholder="What is this #{kind(node)} for?" spellcheck="true">#{Fmt.esc(Model.description(node))}</textarea></label>|,
       ~s|<dl><dt>Kind</dt><dd>#{kind(node)}</dd><dt>ID</dt><dd><code>#{Fmt.esc(node.id)}</code></dd>|,
-      ~s|<dt>Requires</dt><dd>#{chips.(requires)}</dd><dt>Required by</dt><dd>#{chips.(required_by)}</dd></dl></div>|
+      ~s|<dt>Requires</dt><dd>#{chips.(requires)}</dd><dt>Required by</dt><dd>#{chips.(required_by)}</dd>#{if linked != [], do: "<dt>Linked</dt><dd>#{chips.(linked)}</dd>"}</dl></div>|
     ]
   end
 

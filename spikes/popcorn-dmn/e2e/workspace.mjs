@@ -83,7 +83,7 @@ ok("undo brings it back", (await count("#scene g[data-id]")) === n0);
 // create-and-connect pad
 await page.locator('#scene g[data-id="front"]').click();
 await settle();
-ok("a selected decision offers 3 things to create", (await count("#pad-front [data-create]")) === 3);
+ok("a selected decision offers 4 things to create", (await count("#pad-front [data-create]")) === 4);
 const nn = await count("#scene g[data-id]"),
   ne = await count("#scene line.vis");
 await page.locator('#pad-front [data-create="input"]').click();
@@ -97,14 +97,83 @@ ok(
   (await page.locator(".node.sel .nm, .node.sel").count()) === 1 &&
     (await page.evaluate(() => document.activeElement?.classList.contains("nname")))
 );
-ok("an input data node offers nothing to create", (await count(".node.sel [data-create]")) === 0);
+ok(
+  "an input data node offers only an annotation",
+  (await count(".node.sel [data-create]")) === 1 && (await count(".node.sel [data-create=annotation]")) === 1
+);
 ok("the old pad is gone", (await count("#pad-front [data-create]")) === 0);
 await page.locator("[data-click=undo]").click();
 await settle(600);
 ok("undo removes node and edge", (await count("#scene g[data-id]")) === nn && (await count("#scene line.vis")) === ne);
 await page.locator('#scene g[data-id="dti"]').click();
 await settle();
-ok("a business knowledge model can only require another", (await count("#pad-dti [data-create]")) === 1);
+ok(
+  "a business knowledge model offers business knowledge and an annotation",
+  (await count("#pad-dti [data-create]")) === 2
+);
+
+// text annotations
+await page.locator('#scene g[data-id="front"]').click();
+await settle();
+const an = await count("#scene g[data-id]"),
+  ae = await count("#scene line.vis");
+await page.locator('#pad-front [data-create="annotation"]').click();
+await settle(800);
+ok(
+  "the pad creates an annotation joined by an association",
+  (await count("#scene g[data-id]")) === an + 1 &&
+    (await count("#scene line.vis")) === ae + 1 &&
+    (await count("#scene g.annotation")) === 1
+);
+const aid = await page.locator("#scene g.annotation").getAttribute("data-id");
+ok(
+  "the annotation is selected and its text field focused",
+  await page.evaluate(
+    () => document.activeElement?.dataset.op === "nname" && document.activeElement.tagName === "TEXTAREA"
+  )
+);
+await page.keyboard.type(" for review");
+await settle(500);
+ok("typing shows the text in the diagram", (await text(`#nm-${aid}`)).includes("for review"), await text(`#nm-${aid}`));
+ok(
+  "the dotted line has no arrow",
+  (await page.locator("#scene g.edge").last().locator("line.vis").getAttribute("marker-end")) === null
+);
+const before = await page.locator(`#scene g[data-id="${aid}"] .hitbox`).boundingBox();
+const rz = await page.locator(`#scene g[data-id="${aid}"] .resize`).boundingBox();
+await page.mouse.move(rz.x + rz.width / 2, rz.y + rz.height / 2);
+await page.mouse.down();
+await page.mouse.move(rz.x + rz.width / 2 + 60, rz.y + rz.height / 2 + 30, { steps: 5 });
+await page.mouse.up();
+await settle(500);
+const after = await page.locator(`#scene g[data-id="${aid}"] .hitbox`).boundingBox();
+ok(
+  "dragging the corner resizes it",
+  after.width > before.width + 30 && after.height > before.height + 15,
+  `${before.width} -> ${after.width}`
+);
+await page.locator('[data-click="tab:xml"]').click();
+await settle(500);
+ok(
+  "the XML has the annotation and association",
+  (await text("#xml")).includes("<textAnnotation") && (await text("#xml")).includes("<association")
+);
+await page.locator('[data-click="tab:editor"]').click();
+await settle();
+// create, typing and resize are three undo steps
+for (let i = 0; i < 3; i++) {
+  await page.locator("[data-click=undo]").click();
+  await settle(500);
+}
+ok(
+  "undo takes the annotation away again",
+  (await count("#scene g.annotation")) === 0 && (await count("#scene g[data-id]")) === an
+);
+await page.dragAndDrop('#palette [data-kind="annotation"]', "#drd", { targetPosition: { x: 120, y: 120 } });
+await settle(600);
+ok("an annotation can be dragged in from the palette", (await count("#scene g.annotation")) === 1);
+await page.locator("[data-click=undo]").click();
+await settle(500);
 
 // type pill
 await page.locator('#scene g[data-id="front"]').click();

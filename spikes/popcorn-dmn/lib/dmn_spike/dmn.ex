@@ -22,7 +22,12 @@ defmodule DmnSpike.Dmn do
   @doc false
   def ns_uri(prefix), do: @ns["xmlns:" <> prefix]
 
-  @elements %{"inputData" => :input, "decision" => :decision, "businessKnowledgeModel" => :bkm}
+  @elements %{
+    "inputData" => :input,
+    "decision" => :decision,
+    "businessKnowledgeModel" => :bkm,
+    "textAnnotation" => :annotation
+  }
   @known_top [
     "itemDefinition",
     "inputData",
@@ -30,7 +35,9 @@ defmodule DmnSpike.Dmn do
     "businessKnowledgeModel",
     "DMNDI",
     "extensionElements",
-    "description"
+    "description",
+    "textAnnotation",
+    "association"
   ]
 
   # ===================================================================== export
@@ -49,7 +56,8 @@ defmodule DmnSpike.Dmn do
         ([{"id", "_definitions"}, {"name", name}, {"namespace", "https://popcorn.spike/dmn"}] ++ Map.to_list(@ns))
         |> Enum.sort(),
         Enum.map(Enum.with_index(m.types), fn {t, i} -> item_xml(t, "_t#{i}") end) ++
-          Enum.map(nodes, &node_xml(m, &1)) ++ [dmndi(m, nodes)]
+          Enum.map(nodes, &node_xml(m, &1)) ++
+          Enum.map(m.links, &link_xml/1) ++ [dmndi(m, nodes)]
       )
 
     ~s|<?xml version="1.0" encoding="UTF-8"?>\n| <> render(root, 0)
@@ -81,6 +89,8 @@ defmodule DmnSpike.Dmn do
     ]
 
   @doc false
+  def node_xml(_m, %{type: :annotation} = n), do: el("textAnnotation", [{"id", n.id}], [el("text", [], [n.name])])
+
   def node_xml(m, n) do
     tag = Enum.find_value(@elements, fn {t, k} -> if k == n.type, do: t end)
 
@@ -133,6 +143,21 @@ defmodule DmnSpike.Dmn do
   @doc false
   def req_id(from, to), do: "_req-#{from}-#{to}"
 
+  @doc "The element that carries a link: an association is a top-level element of its own."
+  def link_xml({from, to, :association}) do
+    el("association", [{"id", link_id(from, to)}], [
+      el("sourceRef", [{"href", "#" <> from}], []),
+      el("targetRef", [{"href", "#" <> to}], [])
+    ])
+  end
+
+  @doc false
+  def link_id(from, to), do: "_assoc-#{from}-#{to}"
+
+  @doc "The id of the diagram element an edge refers to."
+  def edge_id(from, to, :association), do: link_id(from, to)
+  def edge_id(from, to, _kind), do: req_id(from, to)
+
   defp input_ext(%{expr: %{result: ""}}), do: []
   defp input_ext(%{expr: %{result: v}}), do: [el("extensionElements", [], [el("spike:value", [], [v])])]
 
@@ -184,10 +209,11 @@ defmodule DmnSpike.Dmn do
       end
 
     edges =
-      for {from, to, _} <- m.edges do
+      for {from, to, kind} <- Model.edges_all(m) do
         {x1, y1, x2, y2} = Svg.endpoints(m.nodes[from], m.nodes[to])
+        rid = edge_id(from, to, kind)
 
-        el("dmndi:DMNEdge", [{"id", "#{req_id(from, to)}-edge"}, {"dmnElementRef", req_id(from, to)}], [
+        el("dmndi:DMNEdge", [{"id", "#{rid}-edge"}, {"dmnElementRef", rid}], [
           el("di:waypoint", [{"x", x1}, {"y", y1}], []),
           el("di:waypoint", [{"x", x2}, {"y", y2}], [])
         ])
@@ -289,15 +315,19 @@ defmodule DmnSpike.Dmn do
       end)
 
     valid = Enum.filter(reqs.edges, fn {f, t, _} -> nodes[f] && nodes[t] end)
+    {links, unresolved} = associations(children, nodes)
 
-    model = %Model{nodes: nodes, edges: valid, types: types, next: next_id(nodes)}
+    model = %Model{nodes: nodes, edges: valid, links: links, types: types, next: next_id(nodes)}
     model = place_missing(model, Enum.sort(missing))
 
     all_notes = Enum.flat_map(notes, & &1)
 
+    {drg, other} = nodes |> Map.values() |> Enum.split_with(&(not Model.artifact?(&1)))
+
     report = %{
       name: attr(attrs, "name"),
-      nodes: map_size(nodes),
+      nodes: length(drg),
+      artifacts: other |> Enum.frequencies_by(& &1.type),
       edges: length(valid),
       types: length(types),
       placed: length(missing),
@@ -309,6 +339,7 @@ defmodule DmnSpike.Dmn do
       # not shown or editable yet, but written back exactly as it was
       kept:
         Map.merge(dropped, reqs.dropped, fn _, a, b -> a + b end)
+        |> merge_counts(List.duplicate("association to an unknown element", unresolved))
         |> merge_counts(for n <- all_notes, String.contains?(n, ": kept: "), do: String.replace(n, ": kept: ", ": "))
         |> merge_counts(if(extra_diagrams > 0, do: ["extra DMNDiagram"], else: [])),
       # really lost when the file is saved
@@ -317,6 +348,34 @@ defmodule DmnSpike.Dmn do
     }
 
     {model, report}
+  end
+
+  # associations between two elements the editor knows; the rest stays in the file untouched
+  defp associations(children, nodes) do
+    all =
+      for {tag, _, kids} = c <- children,
+          local(tag) == "association",
+          do: {c, ref_of(kids, "sourceRef"), ref_of(kids, "targetRef")}
+
+    links = for {_, s, t} <- all, key = link_key(nodes, s, t), do: key
+    {Enum.uniq(links), Enum.count(all, fn {_, s, t} -> link_key(nodes, s, t) == nil end)}
+  end
+
+  @doc "The model's key for an association between `s` and `t`, annotation first; nil when one of them is unknown."
+  def link_key(nodes, s, t) do
+    cond do
+      nodes[s] == nil or nodes[t] == nil -> nil
+      nodes[t].type == :annotation and nodes[s].type != :annotation -> {t, s, :association}
+      true -> {s, t, :association}
+    end
+  end
+
+  @doc false
+  def ref_of(kids, tag) do
+    case find(Enum.filter(kids, &is_tuple/1), tag) do
+      nil -> nil
+      {_, a, _} -> a |> attr("href") |> to_string() |> String.split("#") |> List.last()
+    end
   end
 
   # keep file positions; with no diagram at all lay everything out, otherwise put the
@@ -391,7 +450,7 @@ defmodule DmnSpike.Dmn do
     id = attr(attrs, "id") || "n-#{:erlang.unique_integer([:positive])}"
     var = find(kids, "variable")
     {expr, expr_notes} = expression(type, kids)
-    name = attr(attrs, "name") || id
+    name = if type == :annotation, do: text(find(kids, "text")) || "", else: attr(attrs, "name") || id
 
     n = %{
       id: id,
@@ -408,6 +467,8 @@ defmodule DmnSpike.Dmn do
 
     {n, Enum.map(expr_notes, &"#{name}: #{&1}")}
   end
+
+  defp expression(:annotation, _kids), do: {Model.artifact_expr(), []}
 
   defp expression(:input, kids) do
     ext = find(kids, "extensionElements")

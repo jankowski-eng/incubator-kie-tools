@@ -17,7 +17,7 @@ defmodule DmnSpike.Dmn.Overlay do
 
   alias DmnSpike.{Dmn, Model, Svg}
 
-  @elements ~w(inputData decision businessKnowledgeModel)
+  @elements ~w(inputData decision businessKnowledgeModel textAnnotation)
   @expr_tags ~w(literalExpression context decisionTable invocation relation functionDefinition list conditional filter for some every)
 
   # the order of children DMN's schema prescribes (unknown children go before the expression)
@@ -33,18 +33,30 @@ defmodule DmnSpike.Dmn.Overlay do
 
   @doc "Records what is needed to write `model` back into the document it came from."
   def build(xml, root_tag, root_attrs, children, %Model{} = m, shapes) do
-    markers =
-      Enum.map(children, fn {tag, a, _} = c ->
+    {markers, _seen} =
+      Enum.map_reduce(children, MapSet.new(), fn {tag, a, kids} = c, seen ->
         name = Dmn.local(tag)
         id = Dmn.attr(a, "id")
 
+        key =
+          name == "association" && Dmn.link_key(m.nodes, Dmn.ref_of(kids, "sourceRef"), Dmn.ref_of(kids, "targetRef"))
+
         cond do
-          name in @elements and m.nodes[id] -> {:node, id}
-          name == "itemDefinition" and Dmn.attr(a, "name") -> {:type, Dmn.attr(a, "name")}
-          name == "DMNDI" -> :dmndi
-          true -> {:raw, c}
+          name in @elements and m.nodes[id] -> {{:node, id}, seen}
+          name == "itemDefinition" and Dmn.attr(a, "name") -> {{:type, Dmn.attr(a, "name")}, seen}
+          name == "DMNDI" -> {:dmndi, seen}
+          key && not MapSet.member?(seen, key) -> {{:link, key}, MapSet.put(seen, key)}
+          true -> {{:raw, c}, seen}
         end
       end)
+
+    links =
+      for {tag, a, kids} = c <- children,
+          Dmn.local(tag) == "association",
+          key = Dmn.link_key(m.nodes, Dmn.ref_of(kids, "sourceRef"), Dmn.ref_of(kids, "targetRef")),
+          reduce: %{} do
+        acc -> Map.put_new(acc, key, %{raw: c, id: Dmn.attr(a, "id")})
+      end
 
     nodes =
       for {tag, a, _} = c <- children, Dmn.local(tag) in @elements, node = m.nodes[Dmn.attr(a, "id")], into: %{} do
@@ -65,6 +77,7 @@ defmodule DmnSpike.Dmn.Overlay do
       root_tag: root_tag,
       root_attrs: root_attrs,
       children: markers,
+      links: links,
       nodes: nodes,
       types: types,
       diagram: %{
@@ -109,7 +122,7 @@ defmodule DmnSpike.Dmn.Overlay do
     end
   end
 
-  defp diagram_state(m), do: {Map.new(m.nodes, fn {id, n} -> {id, bounds(n)} end), Enum.sort(m.edges)}
+  defp diagram_state(m), do: {Map.new(m.nodes, fn {id, n} -> {id, bounds(n)} end), Enum.sort(Model.edges_all(m))}
 
   @doc "What decides whether an element has been edited: its modelled content and its incoming requirements."
   def fingerprint(%Model{} = m, node) do
@@ -272,6 +285,8 @@ defmodule DmnSpike.Dmn.Overlay do
       |> Enum.sort_by(& &1.id)
       |> Enum.map(&q(Dmn.node_xml(m, &1), pre))
 
+    new_links = m.links |> Enum.reject(&Map.has_key?(doc.links, &1)) |> Enum.map(&q(Dmn.link_xml(&1), pre))
+
     indexed = Enum.with_index(doc.children)
     idx = fn pred -> indexed |> Enum.filter(fn {mk, _} -> pred.(mk) end) |> Enum.map(&elem(&1, 1)) end
     type_idx = idx.(&match?({:type, _}, &1))
@@ -280,11 +295,14 @@ defmodule DmnSpike.Dmn.Overlay do
 
     types_at = insertion(type_idx, List.first(node_idx ++ dmndi_idx))
     nodes_at = insertion(node_idx, List.first(dmndi_idx))
+    links_at = insertion(idx.(&match?({:link, _}, &1)), List.first(dmndi_idx))
 
     body =
       Enum.flat_map(indexed, fn {marker, i} ->
         before =
-          if(types_at == {:before, i}, do: new_types, else: []) ++ if nodes_at == {:before, i}, do: new_nodes, else: []
+          if(types_at == {:before, i}, do: new_types, else: []) ++
+            if(nodes_at == {:before, i}, do: new_nodes, else: []) ++
+            if links_at == {:before, i}, do: new_links, else: []
 
         item =
           case marker do
@@ -297,17 +315,24 @@ defmodule DmnSpike.Dmn.Overlay do
             :dmndi ->
               [:dmndi]
 
+            {:link, key} ->
+              if key in m.links, do: [from_simple(doc.links[key].raw)], else: []
+
             {:raw, c} ->
               [from_simple(c)]
           end
 
         after_ =
-          if(types_at == {:after, i}, do: new_types, else: []) ++ if nodes_at == {:after, i}, do: new_nodes, else: []
+          if(types_at == {:after, i}, do: new_types, else: []) ++
+            if(nodes_at == {:after, i}, do: new_nodes, else: []) ++
+            if links_at == {:after, i}, do: new_links, else: []
 
         before ++ item ++ after_
       end)
 
-    body ++ if(types_at == :end, do: new_types, else: []) ++ if nodes_at == :end, do: new_nodes, else: []
+    body ++
+      if(types_at == :end, do: new_types, else: []) ++
+      if(nodes_at == :end, do: new_nodes, else: []) ++ if links_at == :end, do: new_links, else: []
   end
 
   # new elements go after the last element of their kind, else before `fallback`, else at the end
@@ -325,6 +350,22 @@ defmodule DmnSpike.Dmn.Overlay do
       %{raw: raw, fp: fp} = entry ->
         if fingerprint(m, node) == fp, do: from_simple(raw), else: regen_node(m, node, entry, pre)
     end
+  end
+
+  defp regen_node(_m, %{type: :annotation} = node, %{raw: {tag, attrs, kids}}, pre) do
+    raw = Enum.filter(kids, &is_tuple/1)
+    others = for r <- raw, Dmn.local(elem(r, 0)) != "text", do: from_simple(r)
+
+    text =
+      case Enum.find(raw, &(Dmn.local(elem(&1, 0)) == "text")) do
+        {_, _, _} = t ->
+          if Dmn.text(t) == node.name, do: from_simple(t), else: {:el, elem(t, 0), elem(t, 1), [node.name]}
+
+        nil ->
+          q(Dmn.el("text", [], [node.name]), pre)
+      end
+
+    {:el, tag, put_attrs(attrs, [{"id", node.id}]), others ++ [text]}
   end
 
   defp regen_node(m, node, %{raw: {tag, attrs, kids}, efp: efp}, pre) do
@@ -457,8 +498,13 @@ defmodule DmnSpike.Dmn.Overlay do
   defp rebuild_diagram(m, doc, pre, ids_out) do
     # the requirement ids in the output, per edge
     expected =
-      for {from, to, kind} <- m.edges, into: %{} do
-        rid = get_in(doc.nodes, [to, :reqs, {from, kind}]) || Dmn.req_id(from, to)
+      for {from, to, kind} <- Model.edges_all(m), into: %{} do
+        rid =
+          case kind do
+            :association -> get_in(doc.links, [{from, to, kind}, :id]) || Dmn.link_id(from, to)
+            _ -> get_in(doc.nodes, [to, :reqs, {from, kind}]) || Dmn.req_id(from, to)
+          end
+
         {rid, {from, to}}
       end
 

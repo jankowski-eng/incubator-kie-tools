@@ -1246,6 +1246,52 @@
         fill: var(--bkm-fill);
         stroke: var(--bkm);
       }
+
+      /* text annotations */
+      .pal.annotation svg > * {
+        fill: none;
+        stroke: var(--text);
+      }
+      .node.annotation .hitbox {
+        fill: transparent;
+      }
+      .node.annotation .shape {
+        stroke: var(--text);
+        stroke-width: 1.5;
+        fill: none;
+      }
+      .node.annotation.sel .shape {
+        stroke: var(--accent);
+      }
+      .node.annotation foreignObject {
+        pointer-events: none;
+      }
+      .atext {
+        font: 12.5px/1.4 var(--font);
+        color: var(--text);
+        white-space: pre-wrap;
+        overflow: hidden;
+        height: 100%;
+      }
+      .node .resize {
+        display: none;
+        cursor: nwse-resize;
+      }
+      .node.sel .resize {
+        display: block;
+      }
+      .node .resize rect {
+        fill: transparent;
+      }
+      .node .resize path {
+        stroke: var(--muted);
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        fill: none;
+      }
+      #drd marker#dot circle {
+        fill: currentColor;
+      }
     </style>
   </head>
   <body>
@@ -1308,6 +1354,18 @@
                 <polygon points="8,1 41,1 41,20 34,27 1,27 1,8" stroke-linejoin="round" />
               </svg>
             </div>
+            <div
+              class="pal annotation"
+              draggable="true"
+              data-kind="annotation"
+              title="Text annotation: drag onto the canvas"
+              aria-label="Text annotation"
+            >
+              <svg viewBox="0 0 42 28" aria-hidden="true">
+                <path d="M12 2H4V26H12" />
+                <path d="M18 9H38M18 14H34M18 19H36" />
+              </svg>
+            </div>
           </div>
           <div class="zoomctl">
             <button data-click="zoom-in" title="Zoom in">+</button
@@ -1341,6 +1399,9 @@
                 orient="auto-start-reverse"
               >
                 <path d="M0 0L10 5L0 10z" />
+              </marker>
+              <marker id="dot" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7">
+                <circle cx="5" cy="5" r="4" />
               </marker>
               <marker
                 id="arrow-open"

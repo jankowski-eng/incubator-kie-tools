@@ -16,7 +16,7 @@ defmodule DmnSpike.Model do
     "prod" => "tRequested"
   }
 
-  defstruct nodes: %{}, edges: [], types: [], next: 1, doc: nil
+  defstruct nodes: %{}, edges: [], links: [], types: [], next: 1, doc: nil
 
   def sample do
     nodes =
@@ -94,12 +94,24 @@ defmodule DmnSpike.Model do
     }
   end
 
+  @doc "Resizes an annotation or group so that its bottom-right corner is at `{x, y}` (minimum 60 × 30)."
+  def resize(%__MODULE__{} = m, id, x, y),
+    do: update_in(m.nodes[id], &%{&1 | w: max(round(x - &1.x), 60), h: max(round(y - &1.y), 30)})
+
   def move(%__MODULE__{} = m, id, x, y), do: update_in(m.nodes[id], &%{&1 | x: round(x), y: round(y)})
 
   @hit_policies ["UNIQUE", "FIRST", "ANY", "COLLECT", "RULE ORDER"]
   def hit_policies, do: @hit_policies
 
   def kind(%{expr: expr}), do: Map.get(expr, :kind, :context)
+
+  # elements of the diagram that are not part of the decision graph: no expression, no value
+  @artifacts [:annotation, :source, :group]
+  def artifact?(%{type: t}), do: t in @artifacts
+  def artifact_expr, do: %{kind: :raw, tag: nil}
+
+  @doc "Requirements (evaluated) and links (association, authority requirement), as one list: the diagram's edges."
+  def edges_all(%__MODULE__{edges: e, links: l}), do: e ++ l
 
   def new_table,
     do: %{
@@ -228,8 +240,8 @@ defmodule DmnSpike.Model do
     end)
   end
 
-  def edges_of(%__MODULE__{edges: edges}, id) do
-    edges |> Enum.with_index() |> Enum.filter(fn {{a, b, _}, _} -> a == id or b == id end)
+  def edges_of(%__MODULE__{} = m, id) do
+    m |> edges_all() |> Enum.with_index() |> Enum.filter(fn {{a, b, _}, _} -> a == id or b == id end)
   end
 
   @doc "Names usable in an expression of node `id`: requirement names and the rows before `idx`."
@@ -244,8 +256,10 @@ defmodule DmnSpike.Model do
   @kinds %{
     "decision" => {:decision, "decision"},
     "input" => {:input, "input data"},
-    "bkm" => {:bkm, "business knowledge"}
+    "bkm" => {:bkm, "business knowledge"},
+    "annotation" => {:annotation, "annotation"}
   }
+  @sizes %{annotation: {200, 60}}
 
   @doc "Adds a node of `kind` centred on `{x, y}`; returns `{model, id}`."
   def add_node(%__MODULE__{} = m, kind, x, y) do
@@ -257,15 +271,17 @@ defmodule DmnSpike.Model do
     base = "New #{label}"
     name = Enum.find([base | Enum.map(2..99, &"#{base} #{&1}")], &(not MapSet.member?(names, &1)))
 
+    {w, h} = Map.get(@sizes, type, {150, 60})
+
     node = %{
       id: id,
       type: type,
       name: name,
-      x: round(x - 75),
-      y: round(y - 30),
-      w: 150,
-      h: 60,
-      expr: %{rows: [], result: ""},
+      x: round(x - w / 2),
+      y: round(y - h / 2),
+      w: w,
+      h: h,
+      expr: if(type in @artifacts, do: artifact_expr(), else: %{rows: [], result: ""}),
       type_ref: nil,
       description: ""
     }
@@ -277,6 +293,10 @@ defmodule DmnSpike.Model do
   def required_kinds(type),
     do: for(kind <- ["input", "decision", "bkm"], valid_pair?(elem(@kinds[kind], 0), type), do: kind)
 
+  @doc "What the create pad offers for a node of `type`: what it requires, and an annotation."
+  def pad_kinds(:annotation), do: []
+  def pad_kinds(type), do: required_kinds(type) ++ ["annotation"]
+
   @doc """
   Adds a node of `kind` that `to` requires and connects it. Decisions and inputs go below `to`,
   business knowledge beside it; the first spot that overlaps no node is used.
@@ -284,7 +304,7 @@ defmodule DmnSpike.Model do
   def add_required(%__MODULE__{} = m, to, kind) do
     target = m.nodes[to]
 
-    if target && kind in required_kinds(target.type) do
+    if target && kind in pad_kinds(target.type) do
       {m, id} = add_node(m, kind, 0, 0)
       {x, y} = free_spot(m, id, target, kind)
       m = put_in(m.nodes[id], %{m.nodes[id] | x: x, y: y})
@@ -297,21 +317,37 @@ defmodule DmnSpike.Model do
 
   defp free_spot(m, id, target, kind) do
     others = for {k, n} <- m.nodes, k != id, do: n
-    {ks, dy} = if kind == "bkm", do: {[1, -1, 2, -2, 3, -3], 0}, else: {[0, 1, -1, 2, -2, 3, -3], target.h + 80}
+    me = m.nodes[id]
+    # business knowledge and annotations go beside the node, everything else below it
+    {ks, dy} =
+      if kind in ["bkm", "annotation"],
+        do: {[1, -1, 2, -2, 3, -3], 0},
+        else: {[0, 1, -1, 2, -2, 3, -3], target.h + 80}
 
     ks
-    |> Enum.map(&{target.x + &1 * 190, target.y + dy})
-    |> Enum.find(fn {x, y} -> not Enum.any?(others, &overlaps?(&1, x, y, 150, 60)) end)
+    |> Enum.map(&{target.x + &1 * (me.w + 40), target.y + dy})
+    |> Enum.find(fn {x, y} -> not Enum.any?(others, &overlaps?(&1, x, y, me.w, me.h)) end)
     |> Kernel.||({target.x, target.y + dy + 100})
   end
 
   defp overlaps?(n, x, y, w, h), do: x < n.x + n.w + 20 and n.x < x + w + 20 and y < n.y + n.h + 20 and n.y < y + h + 20
 
   def delete_node(%__MODULE__{} = m, id) do
-    %{m | nodes: Map.delete(m.nodes, id), edges: Enum.reject(m.edges, fn {a, b, _} -> a == id or b == id end)}
+    touches = fn {a, b, _} -> a == id or b == id end
+
+    %{
+      m
+      | nodes: Map.delete(m.nodes, id),
+        edges: Enum.reject(m.edges, touches),
+        links: Enum.reject(m.links, touches)
+    }
   end
 
-  def delete_edge(%__MODULE__{} = m, i), do: %{m | edges: List.delete_at(m.edges, i)}
+  # `i` indexes edges_all/1: requirements first, then links
+  def delete_edge(%__MODULE__{edges: edges} = m, i) when i < length(edges), do: %{m | edges: List.delete_at(edges, i)}
+
+  def delete_edge(%__MODULE__{edges: edges, links: links} = m, i),
+    do: %{m | links: List.delete_at(links, i - length(edges))}
 
   def rename(%__MODULE__{} = m, id, name), do: put_in(m.nodes[id].name, name)
   def set_type_ref(%__MODULE__{} = m, id, ref), do: put_in(m.nodes[id].type_ref, ref)
@@ -324,20 +360,50 @@ defmodule DmnSpike.Model do
     {pick.(for({f, t, k} <- m.edges, t == id, do: {f, k})), pick.(for({f, t, k} <- m.edges, f == id, do: {t, k}))}
   end
 
+  @doc "Everything joined to `id` by a link (association, authority requirement), as `{id, name, kind}`."
+  def links_of(%__MODULE__{} = m, id) do
+    for {a, b, kind} <- m.links,
+        id in [a, b],
+        other = if(a == id, do: b, else: a),
+        n = m.nodes[other],
+        do: {n.id, n.name, kind}
+  end
+
   @doc "DMN requirement rules: input/decision -> decision (information), bkm -> decision/bkm (knowledge)."
   def connect(%__MODULE__{} = m, from, to) do
     a = m.nodes[from]
     b = m.nodes[to]
 
     cond do
-      is_nil(a) or is_nil(b) -> {:error, "nothing to connect"}
-      from == to -> {:error, "a node cannot require itself"}
-      Enum.any?(m.edges, fn {x, y, _} -> x == from and y == to end) -> {:error, "already connected"}
-      not valid_pair?(a.type, b.type) -> {:error, "#{a.type} cannot be required by #{b.type}"}
-      requires?(m, from, to) -> {:error, "that would create a cycle"}
-      true -> {:ok, %{m | edges: m.edges ++ [{from, to, if(a.type == :bkm, do: :knowledge, else: :info)}]}}
+      is_nil(a) or is_nil(b) ->
+        {:error, "nothing to connect"}
+
+      from == to ->
+        {:error, "a node cannot require itself"}
+
+      Enum.any?(edges_all(m), fn {x, y, _} ->
+        (x == from and y == to) or (x == to and y == from and annotated?(a, b))
+      end) ->
+        {:error, "already connected"}
+
+      annotated?(a, b) ->
+        {:ok, add_link(m, a, b)}
+
+      not valid_pair?(a.type, b.type) ->
+        {:error, "#{a.type} cannot be required by #{b.type}"}
+
+      requires?(m, from, to) ->
+        {:error, "that would create a cycle"}
+
+      true ->
+        {:ok, %{m | edges: m.edges ++ [{from, to, if(a.type == :bkm, do: :knowledge, else: :info)}]}}
     end
   end
+
+  # an association joins an annotation to anything else, always stored annotation first
+  defp annotated?(a, b), do: (a.type == :annotation or b.type == :annotation) and not (a.type == b.type)
+  defp add_link(m, %{type: :annotation} = a, b), do: %{m | links: m.links ++ [{a.id, b.id, :association}]}
+  defp add_link(m, a, %{type: :annotation} = b), do: %{m | links: m.links ++ [{b.id, a.id, :association}]}
 
   defp valid_pair?(:input, :decision), do: true
   defp valid_pair?(:decision, :decision), do: true

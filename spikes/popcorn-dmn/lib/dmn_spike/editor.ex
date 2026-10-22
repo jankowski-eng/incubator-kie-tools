@@ -17,6 +17,7 @@ defmodule DmnSpike.Editor do
       const el = document.querySelector(sel);
       if (!el) continue;
       if (k === 'html') el.innerHTML = a;
+      else if (k === 'outer') el.outerHTML = a;
       else if (k === 'attr') el.setAttribute(a, b);
       else if (k === 'disabled') el.disabled = a;
       else if (k === 'hidden') el.hidden = a;
@@ -57,6 +58,7 @@ defmodule DmnSpike.Editor do
       if (mk) ed({t: 'create', kind: mk.dataset.create});
       else if (e.target.closest('[data-typepill]')) ed({t: 'focus_type'});
       else if (e.target.closest('[data-del]')) ed({t: 'delete'});
+      else if (e.target.closest('[data-resize]')) { mode = 'resize'; svg.setPointerCapture(e.pointerId); ed({t: 'rstart', id: e.target.closest('[data-resize]').dataset.resize}); }
       else if (h) { mode = 'connect'; svg.setPointerCapture(e.pointerId); ed({t: 'cstart', id: h.dataset.handle}); }
       else if (g) { mode = 'drag'; svg.setPointerCapture(e.pointerId); const p = at(e); ed({t: 'down', id: g.dataset.id, x: p.x, y: p.y}); }
       else if (l) ed({t: 'edge', i: Number(l.dataset.edge)});
@@ -75,10 +77,10 @@ defmodule DmnSpike.Editor do
         return;
       }
       const p = at(e);
-      ed({t: mode === 'drag' ? 'move' : 'cmove', x: p.x, y: p.y});
+      ed({t: mode === 'drag' ? 'move' : mode === 'resize' ? 'rmove' : 'cmove', x: p.x, y: p.y});
     });
     svg.addEventListener('pointerup', (e) => {
-      if (mode === 'drag') ed({t: 'up'});
+      if (mode === 'drag' || mode === 'resize') ed({t: 'up'});
       if (mode === 'connect') {
         const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-id]');
         ed({t: 'cend', to: hit ? hit.dataset.id : null});
@@ -187,6 +189,7 @@ defmodule DmnSpike.Editor do
       drag: nil,
       group: nil,
       connect: nil,
+      resize: nil,
       type_sel: 0,
       dock: "expr",
       tab: "editor",
@@ -236,17 +239,24 @@ defmodule DmnSpike.Editor do
     state = if started?, do: state, else: push_history(state, nil)
     model = Model.move(state.model, id, x - dx, y - dy)
 
-    ops =
-      [["attr", ~s|[data-id="#{id}"]|, "transform", Svg.transform(model.nodes[id])]] ++
-        for {e, i} <- Model.edges_of(model, id), do: ["html", "#edge-#{i}", Svg.edge(model, e, i)]
-
-    patch(ops)
+    patch([["attr", ~s|[data-id="#{id}"]|, "transform", Svg.transform(model.nodes[id])]] ++ edge_ops(model, id))
     %{state | model: model, drag: {id, dx, dy, true}}
   end
 
   defp event(%{"t" => "up"}, state) do
     patch([["attr", "#drd", "viewBox", viewbox(state)]])
-    %{state | drag: nil}
+    %{state | drag: nil, resize: nil}
+  end
+
+  defp event(%{"t" => "rstart", "id" => id}, state), do: %{push_history(state, nil) | resize: id}
+
+  defp event(%{"t" => "rmove", "x" => x, "y" => y}, %{resize: id} = state) when id != nil do
+    model = Model.resize(state.model, id, x, y)
+    n = model.nodes[id]
+    results = Eval.run(model)
+
+    patch([["outer", ~s|[data-id="#{id}"]|, Svg.node_html(n, results[id], state.selected)]] ++ edge_ops(model, id))
+    %{state | model: model}
   end
 
   defp event(%{"t" => "pan", "dx" => dx, "dy" => dy}, state), do: set_view(state, View.pan(current_view(state), dx, dy))
@@ -455,6 +465,14 @@ defmodule DmnSpike.Editor do
 
   # --- node and data type controls -----------------------------------------------------
 
+  # the browser fires `change` when a text field loses focus; the typing was already applied by `input`
+  defp event(%{"t" => "op", "op" => op, "kind" => "change", "id" => id, "value" => v} = msg, state)
+       when op in ["nname", "ndesc"] do
+    node = state.model.nodes[id]
+    current = if op == "nname", do: node && node.name, else: node && Model.description(node)
+    if current == v, do: state, else: event(Map.put(msg, "kind", "commit"), state)
+  end
+
   defp event(%{"t" => "op", "op" => "nname", "id" => id, "value" => v}, state) do
     state = push_history(state, {:nname, id}, :merge)
     state = %{state | model: Model.rename(state.model, id, v)}
@@ -623,7 +641,12 @@ defmodule DmnSpike.Editor do
         {:node, id} ->
           {%{state | selected: id, sel_edge: nil},
            [
-             ["attr", ~s|[data-id="#{id}"]|, "class", Svg.node_class(true, results[id].errors != [])],
+             [
+               "attr",
+               ~s|[data-id="#{id}"]|,
+               "class",
+               Svg.node_class(true, results[id].errors != [], state.model.nodes[id].type)
+             ],
              ["html", "#pad-#{id}", Svg.pad(state.model.nodes[id])],
              ["html", "#panel", Panel.render(state.model, id, results, state.dock)]
            ]}
@@ -644,7 +667,7 @@ defmodule DmnSpike.Editor do
             "attr",
             ~s|[data-id="#{state.selected}"]|,
             "class",
-            Svg.node_class(false, results[state.selected].errors != [])
+            Svg.node_class(false, results[state.selected].errors != [], state.model.nodes[state.selected].type)
           ],
           ["html", "#pad-#{state.selected}", ""]
         ],
@@ -664,6 +687,9 @@ defmodule DmnSpike.Editor do
   defp history_ops(state),
     do: [["disabled", "[data-click=undo]", state.past == []], ["disabled", "[data-click=redo]", state.future == []]]
 
+  defp edge_ops(model, id),
+    do: for({e, i} <- Model.edges_of(model, id), do: ["html", "#edge-#{i}", Svg.edge(model, e, i)])
+
   defp patch_types(state), do: patch([["html", "#types", TypesPanel.render(state.model, state.type_sel)]])
 
   # patches for everything that depends on evaluation: value badges, validation, shown table
@@ -677,7 +703,7 @@ defmodule DmnSpike.Editor do
           [
             ["html", "#nv-#{nid}", Svg.node_value_text(r)],
             ["html", "#tt-#{nid}", Svg.node_title(r)],
-            ["attr", ~s|[data-id="#{nid}"]|, "class", Svg.node_class(nid == state.selected, r.errors != [])]
+            ["attr", ~s|[data-id="#{nid}"]|, "class", Svg.node_class(nid == state.selected, r.errors != [], node.type)]
             | acc
           ] ++ if(node.id == state.selected, do: [["html", "#nerr-#{nid}", Panel.errors_html(r)]], else: [])
       end
@@ -717,6 +743,14 @@ defmodule DmnSpike.Editor do
 
   @dismiss ~s|<button class="x" data-click="dismiss-report" title="Dismiss" aria-label="Dismiss">×</button>|
 
+  @artifact_names %{annotation: "annotation", source: "knowledge source", group: "group"}
+
+  defp artifacts(%{artifacts: map}) when map_size(map) > 0 do
+    ", " <> Enum.map_join(Enum.sort(map), ", ", fn {t, n} -> "#{n} #{@artifact_names[t]}#{if n > 1, do: "s"}" end)
+  end
+
+  defp artifacts(_), do: ""
+
   defp report_html(nil), do: ""
 
   defp report_html({:error, file, msg}),
@@ -746,7 +780,7 @@ defmodule DmnSpike.Editor do
         true -> ~s|<span class="good">Nothing was lost; some content is kept as in the file.</span>|
       end
 
-    ~s|<div class="rep"><span><b>#{Fmt.esc(file)}</b>: imported #{r.nodes} nodes, #{r.edges} requirements, #{r.types} data types#{placed}.</span>| <>
+    ~s|<div class="rep"><span><b>#{Fmt.esc(file)}</b>: imported #{r.nodes} nodes, #{r.edges} requirements, #{r.types} data types#{artifacts(r)}#{placed}.</span>| <>
       verdict <>
       if(details == "",
         do: "",

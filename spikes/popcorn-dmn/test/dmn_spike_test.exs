@@ -311,7 +311,7 @@ defmodule DmnSpikeTest do
     test "imports a KIE-style file and reports what it dropped" do
       {:ok, m, r} = Dmn.from_xml(File.read!("test/fixtures/kie_sample.dmn"))
       assert r.name == "Loan Pre-Qualification" and r.nodes == 6 and r.types == 3
-      assert Map.keys(m.nodes) |> Enum.sort() == ["_app", "_back", "_dti", "_fee", "_loan_d", "_risk"]
+      assert Map.keys(m.nodes) |> Enum.sort() == ["_app", "_back", "_dti", "_fee", "_loan_d", "_note", "_risk"]
       assert %{x: 40, y: 320, w: 160, h: 80} = Map.take(m.nodes["_app"], [:x, :y, :w, :h])
       assert m.nodes["_app"].type_ref == "tApplicant" and m.nodes["_back"].type == :decision
 
@@ -319,14 +319,18 @@ defmodule DmnSpikeTest do
                {"_dti", "_loan_d", :knowledge} in m.edges
 
       assert length(m.edges) == 6
-      assert r.kept["knowledgeSource"] == 1 and r.kept["textAnnotation"] == 1 and r.kept["association"] == 1
+      assert r.artifacts == %{annotation: 1}
+      assert m.nodes["_note"].type == :annotation and m.nodes["_note"].name == "Draft rules, review quarterly"
+      assert m.links == [{"_note", "_back", :association}]
+      assert r.kept["knowledgeSource"] == 1 and not Map.has_key?(r.kept, "textAnnotation")
+      refute Map.has_key?(r.kept, "association")
       assert r.kept["authorityRequirement"] == 1
       assert r.dropped == %{}
       assert r.converted == %{"Fee: invocation to a FEEL function call" => 1}
       assert m.nodes["_fee"].expr.result == "feeFunction()"
 
-      assert r.placed == 1 and m.nodes["_fee"].y > m.nodes["_app"].y,
-             "the Fee decision has no DMNShape, so it is placed below the rest"
+      assert r.placed == 2 and m.nodes["_fee"].y > m.nodes["_app"].y,
+             "the Fee decision and the annotation have no DMNShape, so they are placed below the rest"
     end
 
     test "imported types, tables and contexts evaluate" do
@@ -565,6 +569,103 @@ defmodule DmnSpikeTest do
       assert new == ~s|"😀" = Front End Ratio + 1|
       assert new_caret == Autocomplete.utf16_length(~s|"😀" = Front End Ratio|)
       assert String.slice(new, 0..-5//1) |> String.ends_with?("Front End Ratio")
+    end
+  end
+
+  describe "text annotations and associations" do
+    alias DmnSpike.Dmn
+
+    test "an annotation is created beside a node and joined to it" do
+      {:ok, m, id} = Model.add_required(Model.sample(), "front", "annotation")
+      assert m.nodes[id].type == :annotation and Model.artifact?(m.nodes[id])
+      assert m.links == [{id, "front", :association}]
+      assert m.edges == Model.sample().edges, "an association is not a requirement"
+      assert Enum.any?(Model.edges_all(m), &(&1 == {id, "front", :association}))
+      # evaluation ignores it
+      assert Map.fetch!(Eval.run(m), id).value == nil
+      assert Eval.run(m)["front"].value == Eval.run(Model.sample())["front"].value
+      assert Model.pad_kinds(:annotation) == []
+      assert "annotation" in Model.pad_kinds(:input)
+    end
+
+    test "connecting works in both directions, once, and an association is not a requirement" do
+      {m, a} = Model.add_node(Model.sample(), "annotation", 10, 10)
+      assert {:ok, m1} = Model.connect(m, a, "app")
+      assert m1.links == [{a, "app", :association}]
+      assert {:ok, m2} = Model.connect(m, "app", a)
+      assert m2.links == [{a, "app", :association}], "stored annotation first"
+      assert {:error, "already connected"} = Model.connect(m1, "app", a)
+      assert {:error, "already connected"} = Model.connect(m1, a, "app")
+    end
+
+    test "deleting a node or an edge removes its links" do
+      {:ok, m, id} = Model.add_required(Model.sample(), "front", "annotation")
+      i = length(Model.edges_all(m)) - 1
+      assert Model.delete_edge(m, i).links == []
+      assert Model.delete_node(m, "front").links == []
+      assert Model.delete_node(m, id).links == []
+    end
+
+    test "resizing keeps a minimum size" do
+      {m, a} = Model.add_node(Model.sample(), "annotation", 100, 100)
+      n = m.nodes[a]
+      m = Model.resize(m, a, n.x + 300, n.y + 120)
+      assert {m.nodes[a].w, m.nodes[a].h} == {300, 120}
+      m = Model.resize(m, a, n.x + 5, n.y + 5)
+      assert {m.nodes[a].w, m.nodes[a].h} == {60, 30}
+    end
+
+    test "a fresh export writes the annotation, the association and their diagram elements, and reads back" do
+      {:ok, m, id} = Model.add_required(Model.sample(), "front", "annotation")
+      m = Model.rename(m, id, "Check <this> & that")
+      xml = Dmn.to_xml(m)
+      assert xml =~ ~s|<textAnnotation id="#{id}">|
+      assert xml =~ "<text>Check &lt;this&gt; &amp; that</text>"
+      assert xml =~ ~s|<sourceRef href="#{"#" <> id}"/>|
+      assert xml =~ ~s|<targetRef href="#front"/>|
+      assert xml =~ ~s|dmnElementRef="_assoc-#{id}-front"|
+      {:ok, m2, r} = Dmn.from_xml(xml)
+      assert m2.nodes[id].name == "Check <this> & that"
+      assert m2.links == [{id, "front", :association}]
+      assert r.artifacts == %{annotation: 1} and r.nodes == 8
+    end
+
+    test "editing the annotation in a real file changes only that element" do
+      {:ok, m, _} = Dmn.from_xml(File.read!("test/fixtures/kie_sample.dmn"))
+      out = m |> Model.rename("_note", "Reviewed") |> Dmn.to_xml()
+      assert out =~ "<text>Reviewed</text>"
+      refute out =~ "Draft rules"
+      assert out =~ ~s|<association id="_assoc">|, "the association keeps its own id"
+      assert out =~ ~s|<knowledgeSource id="_bureau" name="Credit Bureau"/>|
+    end
+
+    test "adding and removing links in a real file writes and drops the association" do
+      {:ok, m, _} = Dmn.from_xml(File.read!("test/fixtures/kie_sample.dmn"))
+      {:ok, m2} = Model.connect(m, "_note", "_risk")
+      out = Dmn.to_xml(m2)
+      assert out =~ ~s|<association id="_assoc">|
+      assert out =~ ~s|<association id="_assoc-_note-_risk">|
+      {:ok, m3, _} = Dmn.from_xml(out)
+      assert Enum.sort(m3.links) == [{"_note", "_back", :association}, {"_note", "_risk", :association}]
+
+      gone = m |> Model.delete_node("_note") |> Dmn.to_xml()
+      refute gone =~ "textAnnotation"
+      refute gone =~ "<association"
+      refute gone =~ "_note"
+    end
+
+    test "an association to an element that does not exist stays in the file" do
+      xml = """
+      <definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="d" id="d1">
+        <textAnnotation id="t"><text>x</text></textAnnotation>
+        <association id="a"><sourceRef href="#t"/><targetRef href="#ghost"/></association>
+      </definitions>
+      """
+
+      {:ok, m, r} = Dmn.from_xml(xml)
+      assert m.links == []
+      assert r.kept["association to an unknown element"] == 1
+      assert Dmn.to_xml(m) =~ ~s|<association id="a">|
     end
   end
 
