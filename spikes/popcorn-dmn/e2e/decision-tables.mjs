@@ -70,7 +70,7 @@ await page.locator("select[data-op=dthp]").selectOption("UNIQUE");
 await settle(500);
 ok(
   "UNIQUE with several matches -> null + message",
-  (await text("#nv-risk")) === "null" && (await text("#dtv-risk")).includes("rules match"),
+  (await text("#nv-risk")) === "—" && (await text("#dtv-risk")).includes("rules match"),
   await text("#dtv-risk")
 );
 await page.locator("select[data-op=dthp]").selectOption("COLLECT");

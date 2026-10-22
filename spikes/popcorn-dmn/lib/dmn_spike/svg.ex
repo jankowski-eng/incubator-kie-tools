@@ -78,6 +78,7 @@ defmodule DmnSpike.Svg do
     do: "node" <> if(selected?, do: " sel", else: "") <> if(invalid?, do: " invalid", else: "")
 
   def node_value_text(nil), do: ""
+  def node_value_text(%{value: nil}), do: "—"
   def node_value_text(%{value: v}), do: Fmt.short(v)
 
   def node_title(nil), do: ""
@@ -92,7 +93,8 @@ defmodule DmnSpike.Svg do
       shape(n),
       ~s|<text id="nm-#{n.id}" x="#{div(n.w, 2)}" y="26" text-anchor="middle" font-size="13" fill="currentColor">#{Fmt.esc(n.name)}</text>|,
       ~s|<text id="nv-#{n.id}" class="nv" x="#{div(n.w, 2)}" y="45" text-anchor="middle" font-size="12">#{Fmt.esc(node_value_text(result))}</text>|,
-      ~s|<circle class="handle" data-handle="#{n.id}" cx="#{div(n.w, 2)}" cy="0" r="7"><title>Drag to a node that requires this one</title></circle>|,
+      ~s|<g class="handle" data-handle="#{n.id}" transform="translate(#{div(n.w, 2)} 0)"><title>Drag onto a node that needs this one</title><circle r="10"/><path d="M0 4V-4M-3.5 -1L0 -4.5L3.5 -1"/></g>|,
+      ~s|<g class="del" data-del="#{n.id}" transform="translate(#{n.w} 0)"><title>Delete (Del)</title><circle r="9"/><path d="M-3 -3L3 3M3 -3L-3 3"/></g>|,
       "</g>"
     ]
   end

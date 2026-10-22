@@ -125,7 +125,7 @@ await page.locator(`textarea[data-cell="${newId}:0"]`).fill("Front End Ratio * 2
 await settle(500);
 ok(
   "new node expression sees nothing until connected (warning, null)",
-  (await text(`#nv-${newId}`)) === "null",
+  (await text(`#nv-${newId}`)) === "—",
   await text(`#nv-${newId}`)
 );
 

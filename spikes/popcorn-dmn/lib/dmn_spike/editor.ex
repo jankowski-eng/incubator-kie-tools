@@ -20,6 +20,7 @@ defmodule DmnSpike.Editor do
       else if (k === 'attr') el.setAttribute(a, b);
       else if (k === 'disabled') el.disabled = a;
       else if (k === 'hidden') el.hidden = a;
+      else if (k === 'focus') { el.focus(); el.select(); }
       else if (k === 'value') { el.value = a; el.setSelectionRange(b, b); el.focus(); }
     }
   }
@@ -51,11 +52,16 @@ defmodule DmnSpike.Editor do
     svg.addEventListener('wheel', (e) => { e.preventDefault(); const p = at(e); ed({t: 'zoom', f: Math.exp(e.deltaY * 0.0015), x: p.x, y: p.y}); }, {passive: false});
     svg.addEventListener('pointerdown', (e) => {
       const h = e.target.closest('[data-handle]'), g = e.target.closest('[data-id]'), l = e.target.closest('[data-edge]');
-      if (h) { mode = 'connect'; svg.setPointerCapture(e.pointerId); ed({t: 'cstart', id: h.dataset.handle}); }
+      if (e.target.closest('[data-del]')) ed({t: 'delete'});
+      else if (h) { mode = 'connect'; svg.setPointerCapture(e.pointerId); ed({t: 'cstart', id: h.dataset.handle}); }
       else if (g) { mode = 'drag'; svg.setPointerCapture(e.pointerId); const p = at(e); ed({t: 'down', id: g.dataset.id, x: p.x, y: p.y}); }
       else if (l) ed({t: 'edge', i: Number(l.dataset.edge)});
       else { mode = 'pan'; last = {x: e.clientX, y: e.clientY}; svg.setPointerCapture(e.pointerId); }
     });
+    // sent as an event so it is handled after the selection has re-rendered the panel
+    const rename = () => ed({t: 'rename'});
+    // pointer capture retargets the click events to the svg, so look under the pointer
+    svg.addEventListener('dblclick', (e) => { if (document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-id]')) rename(); });
     svg.addEventListener('pointermove', (e) => {
       if (!mode) return;
       if (mode === 'pan') {
@@ -113,7 +119,13 @@ defmodule DmnSpike.Editor do
       if (e.target.dataset.cell && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) ed(cell(e, 'focus'));
     });
     panel.addEventListener('keydown', (e) => {
-      if (e.target.dataset.op === 'dtcell' && e.key === 'Enter') e.preventDefault();
+      if (e.target.dataset.op === 'dtcell' && e.key === 'Enter') {
+        // spreadsheet flow: Enter goes down a row, Shift+Enter up
+        e.preventDefault();
+        const td = e.target.closest('td'), tr = td.parentElement;
+        const next = e.shiftKey ? tr.previousElementSibling : tr.nextElementSibling;
+        next?.children[td.cellIndex]?.querySelector('textarea, input')?.focus();
+      }
       if (!e.target.dataset.cell) return;
       if (e.key === 'Enter') e.preventDefault();
       if (e.key === 'Tab' && !e.shiftKey && panel.querySelector('.ac li')) { e.preventDefault(); ed({...cell(e, 'ac'), pick: 0}); }
@@ -148,6 +160,7 @@ defmodule DmnSpike.Editor do
       const k = e.key.toLowerCase();
       if ((e.metaKey || e.ctrlKey) && k === 'z') { e.preventDefault(); ed({t: e.shiftKey ? 'redo' : 'undo'}); }
       else if ((e.metaKey || e.ctrlKey) && k === 'y') { e.preventDefault(); ed({t: 'redo'}); }
+      else if (k === 'f2') { e.preventDefault(); rename(); }
       else if ((k === 'delete' || k === 'backspace') && (e.target === document.body || e.target.closest('#drd'))) {
         // only from the canvas: with focus on a toolbar button Backspace must not delete the selection
         e.preventDefault();
@@ -266,6 +279,16 @@ defmodule DmnSpike.Editor do
 
   defp event(%{"t" => "delete"}, %{selected: id} = state) when id != nil do
     state |> push_history(nil) |> Map.update!(:model, &Model.delete_node(&1, id)) |> Map.put(:selected, nil) |> render_all(true)
+  end
+
+  defp event(%{"t" => "rename"}, state) do
+    patch([["focus", "#panel .nname"]])
+    state
+  end
+
+  defp event(%{"t" => "click", "what" => "dismiss-report"}, state) do
+    patch([["html", "#report", ""]])
+    %{state | report: nil}
   end
 
   defp event(%{"t" => "click", "what" => "layout"}, state) do
@@ -597,20 +620,36 @@ defmodule DmnSpike.Editor do
   defp xml_ops(%{tab: "xml"} = state), do: [["html", "#xml", Fmt.esc(Dmn.to_xml(state.model, state.name))]]
   defp xml_ops(_state), do: []
 
+  @dismiss ~s|<button class="x" data-click="dismiss-report" title="Dismiss" aria-label="Dismiss">×</button>|
+
   defp report_html(nil), do: ""
-  defp report_html({:error, file, msg}), do: ~s|<div class="bad"><b>#{Fmt.esc(file)}</b>: #{Fmt.esc(msg)}</div>|
+
+  defp report_html({:error, file, msg}),
+    do: ~s|<div class="rep"><span class="bad"><b>#{Fmt.esc(file)}</b>: #{Fmt.esc(msg)}</span>#{@dismiss}</div>|
 
   defp report_html({:ok, file, r}) do
     list = fn map -> for({what, n} <- Enum.sort(map), do: "<li>#{if n > 1, do: "#{n} × "}#{Fmt.esc(what)}</li>") |> Enum.join() end
-    section = fn title, map -> if map == %{}, do: "", else: ~s| #{title}<ul class="dropped">#{list.(map)}</ul>| end
+    section = fn title, map -> if map == %{}, do: "", else: ~s|<p>#{title}</p><ul class="dropped">#{list.(map)}</ul>| end
 
     placed = if r.placed > 0, do: ", #{r.placed} placed automatically (no diagram shape)", else: ""
-    nothing = if r.kept == %{} and r.dropped == %{}, do: " Nothing was lost.", else: ""
+    lost? = r.dropped != %{}
 
-    ~s|<b>#{Fmt.esc(file)}</b>: imported #{r.nodes} nodes, #{r.edges} requirements, #{r.types} data types#{placed}.#{nothing}| <>
+    details =
       section.("Converted for evaluation (written back as in the file until you edit them):", r.converted) <>
-      section.("Kept as in the file (not shown or editable yet):", r.kept) <>
-      section.("Lost when saving:", r.dropped)
+        section.("Kept as in the file (not shown or editable yet):", r.kept) <>
+        section.("Lost when saving:", r.dropped)
+
+    verdict =
+      cond do
+        lost? -> ~s|<span class="bad">Some content will be lost when saving.</span>|
+        r.kept == %{} -> ~s|<span class="good">Nothing was lost.</span>|
+        true -> ~s|<span class="good">Nothing was lost; some content is kept as in the file.</span>|
+      end
+
+    ~s|<div class="rep"><span><b>#{Fmt.esc(file)}</b>: imported #{r.nodes} nodes, #{r.edges} requirements, #{r.types} data types#{placed}.</span>| <>
+      verdict <>
+      if(details == "", do: "", else: ~s|<details#{if lost?, do: " open"}><summary>Details</summary>#{details}</details>|) <>
+      @dismiss <> "</div>"
   end
 
   defp say(state, msg) do

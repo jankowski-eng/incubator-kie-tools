@@ -32,7 +32,12 @@ ok("starts fitted to the diagram", fit.length === 4 && fit[2] >= 820, fit.join("
 const box = await page.locator("#drd").boundingBox();
 const px = box.x + box.width * 0.25,
   py = box.y + box.height * 0.25;
-const frac = (v) => [((px - box.x) / box.width) * v[2] + v[0], ((py - box.y) / box.height) * v[3] + v[1]];
+// the svg keeps the viewBox aspect ratio (xMidYMid meet), so screen px per unit is the smaller of the two scales
+const unit = (v) => Math.min(box.width / v[2], box.height / v[3]);
+const frac = (v) => [
+  (px - box.x - (box.width - unit(v) * v[2]) / 2) / unit(v) + v[0],
+  (py - box.y - (box.height - unit(v) * v[3]) / 2) / unit(v) + v[1],
+];
 const before = frac(fit);
 await page.mouse.move(px, py);
 for (let i = 0; i < 5; i++) {
@@ -87,7 +92,7 @@ for (let i = 1; i <= 10; i++) await page.mouse.move(sx - i * 8, sy - i * 4);
 await page.mouse.up();
 await settle(400);
 const p = await vb();
-const perPx = z[2] / box.width;
+const perPx = 1 / unit(z);
 ok(
   "dragging the background pans",
   Math.abs(p[0] - z[0] - 80 * perPx) < 2 && Math.abs(p[1] - z[1] - 40 * perPx) < 2 && p[2] === z[2],
