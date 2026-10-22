@@ -1292,6 +1292,28 @@
       #drd marker#dot circle {
         fill: currentColor;
       }
+
+      /* knowledge sources */
+      .pal.source svg > * {
+        fill: var(--surface-2);
+        stroke: var(--text);
+      }
+      .node .shape.source {
+        fill: var(--surface-2);
+        stroke: var(--text);
+        stroke-width: 1.5;
+      }
+      .node.source.sel .shape {
+        stroke: var(--accent);
+      }
+      .props .srchead {
+        display: flex;
+        flex-direction: column;
+        gap: 0.8rem;
+      }
+      .props .srchead input {
+        height: 34px;
+      }
     </style>
   </head>
   <body>
@@ -1352,6 +1374,17 @@
             >
               <svg viewBox="0 0 42 28" aria-hidden="true">
                 <polygon points="8,1 41,1 41,20 34,27 1,27 1,8" stroke-linejoin="round" />
+              </svg>
+            </div>
+            <div
+              class="pal source"
+              draggable="true"
+              data-kind="source"
+              title="Knowledge source: drag onto the canvas"
+              aria-label="Knowledge source"
+            >
+              <svg viewBox="0 0 42 28" aria-hidden="true">
+                <path d="M1 1H41V22C33 15 33 29 21 22S9 15 1 22Z" stroke-linejoin="round" />
               </svg>
             </div>
             <div

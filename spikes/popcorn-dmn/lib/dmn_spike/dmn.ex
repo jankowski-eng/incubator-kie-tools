@@ -26,7 +26,8 @@ defmodule DmnSpike.Dmn do
     "inputData" => :input,
     "decision" => :decision,
     "businessKnowledgeModel" => :bkm,
-    "textAnnotation" => :annotation
+    "textAnnotation" => :annotation,
+    "knowledgeSource" => :source
   }
   @known_top [
     "itemDefinition",
@@ -37,6 +38,7 @@ defmodule DmnSpike.Dmn do
     "extensionElements",
     "description",
     "textAnnotation",
+    "knowledgeSource",
     "association"
   ]
 
@@ -57,7 +59,7 @@ defmodule DmnSpike.Dmn do
         |> Enum.sort(),
         Enum.map(Enum.with_index(m.types), fn {t, i} -> item_xml(t, "_t#{i}") end) ++
           Enum.map(nodes, &node_xml(m, &1)) ++
-          Enum.map(m.links, &link_xml/1) ++ [dmndi(m, nodes)]
+          Enum.map(for({_, _, :association} = l <- m.links, do: l), &link_xml/1) ++ [dmndi(m, nodes)]
       )
 
     ~s|<?xml version="1.0" encoding="UTF-8"?>\n| <> render(root, 0)
@@ -91,6 +93,11 @@ defmodule DmnSpike.Dmn do
   @doc false
   def node_xml(_m, %{type: :annotation} = n), do: el("textAnnotation", [{"id", n.id}], [el("text", [], [n.name])])
 
+  def node_xml(m, %{type: :source} = n) do
+    desc = if Model.description(n) == "", do: [], else: [el("description", [], [n.description])]
+    el("knowledgeSource", [{"id", n.id}, {"name", n.name}], desc ++ authority_xml(m, n))
+  end
+
   def node_xml(m, n) do
     tag = Enum.find_value(@elements, fn {t, k} -> if k == n.type, do: t end)
 
@@ -123,7 +130,7 @@ defmodule DmnSpike.Dmn do
       end
 
     desc = if Model.description(n) == "", do: [], else: [el("description", [], [n.description])]
-    el(tag, [{"id", n.id}, {"name", n.name}], desc ++ [var] ++ info ++ know ++ body)
+    el(tag, [{"id", n.id}, {"name", n.name}], desc ++ [var] ++ info ++ know ++ authority_xml(m, n) ++ body)
   end
 
   @doc false
@@ -139,6 +146,19 @@ defmodule DmnSpike.Dmn do
 
   def req_xml(_m, from, to, :knowledge),
     do: el("knowledgeRequirement", [{"id", req_id(from, to)}], [el("requiredKnowledge", [{"href", "#" <> from}], [])])
+
+  def req_xml(m, from, to, :authority) do
+    required =
+      case m.nodes[from].type do
+        :input -> "requiredInput"
+        :decision -> "requiredDecision"
+        _ -> "requiredAuthority"
+      end
+
+    el("authorityRequirement", [{"id", req_id(from, to)}], [el(required, [{"href", "#" <> from}], [])])
+  end
+
+  defp authority_xml(m, n), do: for({from, to, :authority} <- m.links, to == n.id, do: req_xml(m, from, to, :authority))
 
   @doc false
   def req_id(from, to), do: "_req-#{from}-#{to}"
@@ -314,8 +334,13 @@ defmodule DmnSpike.Dmn do
         end
       end)
 
-    valid = Enum.filter(reqs.edges, fn {f, t, _} -> nodes[f] && nodes[t] end)
-    {links, unresolved} = associations(children, nodes)
+    {authority, valid} =
+      reqs.edges
+      |> Enum.filter(fn {f, t, _} -> nodes[f] && nodes[t] end)
+      |> Enum.split_with(&(elem(&1, 2) == :authority))
+
+    {assoc, unresolved} = associations(children, nodes)
+    links = Enum.uniq(assoc ++ authority)
 
     model = %Model{nodes: nodes, edges: valid, links: links, types: types, next: next_id(nodes)}
     model = place_missing(model, Enum.sort(missing))
@@ -468,7 +493,7 @@ defmodule DmnSpike.Dmn do
     {n, Enum.map(expr_notes, &"#{name}: #{&1}")}
   end
 
-  defp expression(:annotation, _kids), do: {Model.artifact_expr(), []}
+  defp expression(type, _kids) when type in [:annotation, :source], do: {Model.artifact_expr(), []}
 
   defp expression(:input, kids) do
     ext = find(kids, "extensionElements")
@@ -678,7 +703,7 @@ defmodule DmnSpike.Dmn do
               add_req(acc, k, ["requiredKnowledge"], to, :knowledge, nodes)
 
             "authorityRequirement" ->
-              update_in(acc.dropped, &Map.update(&1, "authorityRequirement", 1, fn n -> n + 1 end))
+              add_req(acc, k, ["requiredAuthority", "requiredInput", "requiredDecision"], to, :authority, nodes)
 
             _ ->
               acc

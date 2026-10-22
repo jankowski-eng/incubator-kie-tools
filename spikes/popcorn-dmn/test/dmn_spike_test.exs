@@ -311,7 +311,18 @@ defmodule DmnSpikeTest do
     test "imports a KIE-style file and reports what it dropped" do
       {:ok, m, r} = Dmn.from_xml(File.read!("test/fixtures/kie_sample.dmn"))
       assert r.name == "Loan Pre-Qualification" and r.nodes == 6 and r.types == 3
-      assert Map.keys(m.nodes) |> Enum.sort() == ["_app", "_back", "_dti", "_fee", "_loan_d", "_note", "_risk"]
+
+      assert Map.keys(m.nodes) |> Enum.sort() == [
+               "_app",
+               "_back",
+               "_bureau",
+               "_dti",
+               "_fee",
+               "_loan_d",
+               "_note",
+               "_risk"
+             ]
+
       assert %{x: 40, y: 320, w: 160, h: 80} = Map.take(m.nodes["_app"], [:x, :y, :w, :h])
       assert m.nodes["_app"].type_ref == "tApplicant" and m.nodes["_back"].type == :decision
 
@@ -319,17 +330,16 @@ defmodule DmnSpikeTest do
                {"_dti", "_loan_d", :knowledge} in m.edges
 
       assert length(m.edges) == 6
-      assert r.artifacts == %{annotation: 1}
+      assert r.artifacts == %{annotation: 1, source: 1}
       assert m.nodes["_note"].type == :annotation and m.nodes["_note"].name == "Draft rules, review quarterly"
-      assert m.links == [{"_note", "_back", :association}]
-      assert r.kept["knowledgeSource"] == 1 and not Map.has_key?(r.kept, "textAnnotation")
-      refute Map.has_key?(r.kept, "association")
-      assert r.kept["authorityRequirement"] == 1
+      assert Enum.sort(m.links) == [{"_bureau", "_loan_d", :authority}, {"_note", "_back", :association}]
+      assert m.nodes["_bureau"].type == :source and m.nodes["_bureau"].name == "Credit Bureau"
+      assert r.kept == %{}
       assert r.dropped == %{}
       assert r.converted == %{"Fee: invocation to a FEEL function call" => 1}
       assert m.nodes["_fee"].expr.result == "feeFunction()"
 
-      assert r.placed == 2 and m.nodes["_fee"].y > m.nodes["_app"].y,
+      assert r.placed == 3 and m.nodes["_fee"].y > m.nodes["_app"].y,
              "the Fee decision and the annotation have no DMNShape, so they are placed below the rest"
     end
 
@@ -637,6 +647,7 @@ defmodule DmnSpikeTest do
       refute out =~ "Draft rules"
       assert out =~ ~s|<association id="_assoc">|, "the association keeps its own id"
       assert out =~ ~s|<knowledgeSource id="_bureau" name="Credit Bureau"/>|
+      assert out =~ ~s|<authorityRequirement id="_a1">|
     end
 
     test "adding and removing links in a real file writes and drops the association" do
@@ -646,7 +657,12 @@ defmodule DmnSpikeTest do
       assert out =~ ~s|<association id="_assoc">|
       assert out =~ ~s|<association id="_assoc-_note-_risk">|
       {:ok, m3, _} = Dmn.from_xml(out)
-      assert Enum.sort(m3.links) == [{"_note", "_back", :association}, {"_note", "_risk", :association}]
+
+      assert Enum.sort(m3.links) == [
+               {"_bureau", "_loan_d", :authority},
+               {"_note", "_back", :association},
+               {"_note", "_risk", :association}
+             ]
 
       gone = m |> Model.delete_node("_note") |> Dmn.to_xml()
       refute gone =~ "textAnnotation"
@@ -666,6 +682,105 @@ defmodule DmnSpikeTest do
       assert m.links == []
       assert r.kept["association to an unknown element"] == 1
       assert Dmn.to_xml(m) =~ ~s|<association id="a">|
+    end
+  end
+
+  describe "knowledge sources and authority requirements" do
+    alias DmnSpike.Dmn
+
+    test "what may require what" do
+      m = Model.sample()
+      {m, s} = Model.add_node(m, "source", 10, 10)
+      assert m.nodes[s].type == :source and Model.artifact?(m.nodes[s])
+
+      # a source takes its authority from an input, decision or source; decisions and BKMs may require a source
+      assert {:ok, m1} = Model.connect(m, "app", s)
+      assert {:ok, m2} = Model.connect(m, "front", s)
+      assert m2.links == [{"front", s, :authority}]
+      assert {:ok, m3} = Model.connect(m, s, "loan")
+      assert m3.links == [{s, "loan", :authority}]
+      assert {:ok, m4} = Model.connect(m, s, "dti")
+      assert m4.links == [{s, "dti", :authority}]
+      assert {:error, _} = Model.connect(m, s, "app"), "an input requires nothing"
+      assert {:error, _} = Model.connect(m, "dti", s), "a BKM is not an authority for a source"
+      assert {:error, "already connected"} = Model.connect(m1, "app", s)
+      {m5, s2} = Model.add_node(m, "source", 300, 10)
+      assert {:ok, m6} = Model.connect(m5, s, s2)
+      assert {:error, "that would create a cycle"} = Model.connect(m6, s2, s)
+      assert m.edges == Model.sample().edges, "authority links are not evaluated requirements"
+    end
+
+    test "the pad offers sources and the sources' own pad offers what they need" do
+      assert "source" in Model.pad_kinds(:decision) and "source" in Model.pad_kinds(:bkm)
+      assert Model.pad_kinds(:input) == ["annotation"]
+      assert Model.pad_kinds(:source) == ["input", "decision", "source", "annotation"]
+      {:ok, m, s} = Model.add_required(Model.sample(), "loan", "source")
+      assert m.links == [{s, "loan", :authority}]
+      {:ok, m, i} = Model.add_required(m, s, "input")
+      assert m.links |> Enum.member?({i, s, :authority})
+    end
+
+    test "sources do not take part in evaluation or the FEEL scope" do
+      {:ok, m, s} = Model.add_required(Model.sample(), "front", "source")
+      assert Eval.run(m)["front"].value == Eval.run(Model.sample())["front"].value
+      assert Eval.run(m)[s].value == nil
+      assert s not in Model.scope_names(m, "front", 0)
+    end
+
+    test "authority requirements are written into the requiring element and read back" do
+      {:ok, m, s} = Model.add_required(Model.sample(), "loan", "source")
+      m = Model.rename(m, s, "Credit Bureau")
+      {:ok, m} = Model.connect(m, "app", s)
+      xml = Dmn.to_xml(m)
+      assert xml =~ ~s|<knowledgeSource id="#{s}" name="Credit Bureau">|
+      assert xml =~ ~s|<requiredInput href="#app"/>|, "the source requires the input"
+      assert xml =~ ~s|<requiredAuthority href="#{"#" <> s}"/>|, "the decision requires the source"
+      {:ok, m2, r} = Dmn.from_xml(xml)
+      assert Enum.sort(m2.links) == Enum.sort(m.links)
+      assert r.artifacts == %{source: 1}
+    end
+
+    test "in a real file an untouched authority requirement keeps its id when its decision is edited" do
+      {:ok, m, _} = Dmn.from_xml(File.read!("test/fixtures/kie_sample.dmn"))
+      out = m |> Model.rename("_loan_d", "Loan Decision 2") |> Dmn.to_xml()
+      assert out =~ ~s|<authorityRequirement id="_a1">|
+      assert out =~ ~s|<requiredAuthority href="#_bureau"/>|
+      assert out =~ ~s|<decision id="_loan_d" name="Loan Decision 2">|
+    end
+
+    test "connecting and removing in a real file" do
+      {:ok, m, _} = Dmn.from_xml(File.read!("test/fixtures/kie_sample.dmn"))
+      {:ok, m2} = Model.connect(m, "_app", "_bureau")
+      out = Dmn.to_xml(m2)
+      assert out =~ ~s|<knowledgeSource id="_bureau" name="Credit Bureau">|
+      assert out =~ ~s|<requiredInput href="#_app"/>|
+      {:ok, m3, _} = Dmn.from_xml(out)
+      assert {"_app", "_bureau", :authority} in m3.links and {"_bureau", "_loan_d", :authority} in m3.links
+
+      gone = m |> Model.delete_node("_bureau") |> Dmn.to_xml()
+      refute gone =~ "knowledgeSource"
+      refute gone =~ "authorityRequirement"
+      refute gone =~ "_bureau"
+    end
+
+    test "renaming and describing a source rewrites only that element and keeps its other children" do
+      xml = """
+      <definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="d" id="d1">
+        <knowledgeSource id="k" name="Old">
+          <description>Keep</description>
+          <type>Regulation</type>
+          <locationURI>http://example.org/law</locationURI>
+        </knowledgeSource>
+      </definitions>
+      """
+
+      {:ok, m, r} = Dmn.from_xml(xml)
+      assert r.nodes == 0 and r.artifacts == %{source: 1}
+      out = m |> Model.rename("k", "Law") |> Model.set_description("k", "Changed") |> Dmn.to_xml()
+      assert out =~ ~s|<knowledgeSource id="k" name="Law">|
+      assert out =~ "<description>Changed</description>"
+      assert out =~ "<type>Regulation</type>"
+      assert out =~ "<locationURI>http://example.org/law</locationURI>"
     end
   end
 

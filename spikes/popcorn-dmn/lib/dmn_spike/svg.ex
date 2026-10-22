@@ -119,10 +119,10 @@ defmodule DmnSpike.Svg do
 
     [
       ~s|<g class="#{node_class(n.id == selected, invalid?)}" data-id="#{n.id}" transform="#{transform(n)}">|,
-      ~s|<title id="tt-#{n.id}">#{node_title(result)}</title>|,
+      ~s|<title id="tt-#{n.id}">#{if Model.artifact?(n), do: "", else: node_title(result)}</title>|,
       shape(n),
-      ~s|<text id="nm-#{n.id}" x="#{div(n.w, 2)}" y="26" text-anchor="middle" font-size="13" fill="currentColor">#{Fmt.esc(n.name)}</text>|,
-      ~s|<text id="nv-#{n.id}" class="nv" x="#{div(n.w, 2)}" y="45" text-anchor="middle" font-size="12">#{Fmt.esc(node_value_text(result))}</text>|,
+      ~s|<text id="nm-#{n.id}" x="#{div(n.w, 2)}" y="#{if Model.artifact?(n), do: div(n.h, 2) - 4, else: 26}" text-anchor="middle" font-size="13" fill="currentColor">#{Fmt.esc(n.name)}</text>|,
+      ~s|<text id="nv-#{n.id}" class="nv" x="#{div(n.w, 2)}" y="45" text-anchor="middle" font-size="12">#{Fmt.esc(if Model.artifact?(n), do: "", else: node_value_text(result))}</text>|,
       handle(n),
       del(n),
       ~s|<g id="info-#{n.id}">#{info(n)}</g>|,
@@ -140,6 +140,7 @@ defmodule DmnSpike.Svg do
       ~s|<g class="del" data-del="#{n.id}" transform="translate(#{n.w} 0)"><title>Delete (Del)</title><circle r="9"/><path d="M-3 -3L3 3M3 -3L-3 3"/></g>|
 
   @icons %{
+    "source" => ~s|<path d="M-8 -6H8V3C4 0 4 6 0 3S-4 0 -8 3Z" stroke-linejoin="round"/>|,
     "annotation" => ~s|<path d="M-2 -6H-8V6H-2M1 -2H8M1 2H6"/>|,
     "decision" => ~s|<rect x="-8" y="-6" width="16" height="12" rx="2"/>|,
     "input" => ~s|<rect x="-9" y="-6" width="18" height="12" rx="6"/>|,
@@ -149,7 +150,8 @@ defmodule DmnSpike.Svg do
     "decision" => "decision this requires",
     "input" => "input data this requires",
     "bkm" => "business knowledge this requires",
-    "annotation" => "text annotation"
+    "annotation" => "text annotation",
+    "source" => "knowledge source"
   }
 
   @doc "The small ⓘ on a node that has a description; its tooltip is the description."
@@ -194,6 +196,16 @@ defmodule DmnSpike.Svg do
   defp shape(%{type: :annotation} = n),
     do:
       ~s|<rect class="hitbox" width="#{n.w}" height="#{n.h}"/><path class="shape annotation" d="M12 1H1V#{n.h - 1}H12" fill="none"/>|
+
+  # knowledge source: a rectangle with a wavy bottom edge
+  defp shape(%{type: :source} = n) do
+    {w, h} = {n.w, n.h}
+
+    d =
+      "M0 0H#{w}V#{h - 8}C#{w * 0.75} #{h - 18} #{w * 0.75} #{h + 2} #{w * 0.5} #{h - 8}S#{w * 0.25} #{h - 18} 0 #{h - 8}Z"
+
+    ~s|<path class="shape source" d="#{d}" stroke-linejoin="round"/>|
+  end
 
   defp shape(%{type: :decision} = n), do: ~s|<rect class="shape decision" width="#{n.w}" height="#{n.h}" rx="5"/>|
 

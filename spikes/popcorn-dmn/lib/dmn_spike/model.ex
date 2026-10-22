@@ -257,7 +257,8 @@ defmodule DmnSpike.Model do
     "decision" => {:decision, "decision"},
     "input" => {:input, "input data"},
     "bkm" => {:bkm, "business knowledge"},
-    "annotation" => {:annotation, "annotation"}
+    "annotation" => {:annotation, "annotation"},
+    "source" => {:source, "knowledge source"}
   }
   @sizes %{annotation: {200, 60}}
 
@@ -295,7 +296,9 @@ defmodule DmnSpike.Model do
 
   @doc "What the create pad offers for a node of `type`: what it requires, and an annotation."
   def pad_kinds(:annotation), do: []
-  def pad_kinds(type), do: required_kinds(type) ++ ["annotation"]
+  def pad_kinds(:input), do: ["annotation"]
+  def pad_kinds(:source), do: ["input", "decision", "source", "annotation"]
+  def pad_kinds(type), do: required_kinds(type) ++ ["source", "annotation"]
 
   @doc """
   Adds a node of `kind` that `to` requires and connects it. Decisions and inputs go below `to`,
@@ -320,7 +323,7 @@ defmodule DmnSpike.Model do
     me = m.nodes[id]
     # business knowledge and annotations go beside the node, everything else below it
     {ks, dy} =
-      if kind in ["bkm", "annotation"],
+      if kind in ["bkm", "annotation", "source"] and target.type != :source,
         do: {[1, -1, 2, -2, 3, -3], 0},
         else: {[0, 1, -1, 2, -2, 3, -3], target.h + 80}
 
@@ -360,6 +363,12 @@ defmodule DmnSpike.Model do
     {pick.(for({f, t, k} <- m.edges, t == id, do: {f, k})), pick.(for({f, t, k} <- m.edges, f == id, do: {t, k}))}
   end
 
+  @doc "Sources `id` takes its authority from, and what takes its authority from `id`, as `{id, name, :authority}`."
+  def authorities(%__MODULE__{} = m, id) do
+    pick = fn pairs -> for other <- pairs, n = m.nodes[other], do: {n.id, n.name, :authority} end
+    {pick.(for({f, ^id, :authority} <- m.links, do: f)), pick.(for({^id, t, :authority} <- m.links, do: t))}
+  end
+
   @doc "Everything joined to `id` by a link (association, authority requirement), as `{id, name, kind}`."
   def links_of(%__MODULE__{} = m, id) do
     for {a, b, kind} <- m.links,
@@ -389,6 +398,11 @@ defmodule DmnSpike.Model do
       annotated?(a, b) ->
         {:ok, add_link(m, a, b)}
 
+      authority_pair?(a.type, b.type) ->
+        if {to, from, :authority} in m.links,
+          do: {:error, "that would create a cycle"},
+          else: {:ok, %{m | links: m.links ++ [{from, to, :authority}]}}
+
       not valid_pair?(a.type, b.type) ->
         {:error, "#{a.type} cannot be required by #{b.type}"}
 
@@ -404,6 +418,12 @@ defmodule DmnSpike.Model do
   defp annotated?(a, b), do: (a.type == :annotation or b.type == :annotation) and not (a.type == b.type)
   defp add_link(m, %{type: :annotation} = a, b), do: %{m | links: m.links ++ [{a.id, b.id, :association}]}
   defp add_link(m, a, %{type: :annotation} = b), do: %{m | links: m.links ++ [{b.id, a.id, :association}]}
+
+  # authority requirements: a knowledge source requires an input, decision or source as its authority,
+  # and a decision, business knowledge model or source can require a source
+  defp authority_pair?(from, :source) when from in [:input, :decision, :source], do: true
+  defp authority_pair?(:source, to) when to in [:decision, :bkm], do: true
+  defp authority_pair?(_, _), do: false
 
   defp valid_pair?(:input, :decision), do: true
   defp valid_pair?(:decision, :decision), do: true

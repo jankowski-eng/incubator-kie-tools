@@ -38,7 +38,8 @@ await page.screenshot({ path: `${OUT}/s1.png` });
 
 // --- drag: edges follow
 const edgeBefore = await page.locator("#edge-2 line.vis").getAttribute("x1"); // front -> back
-const g = page.locator('#scene g[data-id="front"]');
+// the shape, not the group: the selected node's pad and pill widen the group's box
+const g = page.locator('#scene g[data-id="front"] .shape');
 const b0 = await g.boundingBox();
 await page.mouse.move(b0.x + b0.width / 2, b0.y + b0.height / 2);
 await page.mouse.down();
@@ -49,7 +50,7 @@ for (let i = 1; i <= steps; i++)
 await page.mouse.up();
 await settle(400);
 const dragMs = Date.now() - T;
-const b1 = await page.locator('#scene g[data-id="front"]').boundingBox();
+const b1 = await page.locator('#scene g[data-id="front"] .shape').boundingBox();
 const edgeAfter = await page.locator("#edge-2 line.vis").getAttribute("x1");
 ok(
   "drag moves node",
@@ -63,7 +64,7 @@ console.log(
 ok("undo enabled after drag", !(await page.locator("[data-click=undo]").isDisabled()));
 await page.locator("[data-click=undo]").click();
 await settle(500);
-const b2 = await page.locator('#scene g[data-id="front"]').boundingBox();
+const b2 = await page.locator('#scene g[data-id="front"] .shape').boundingBox();
 ok(
   "undo restores position",
   Math.round(b2.x - b0.x) === 0 && Math.round(b2.y - b0.y) === 0,

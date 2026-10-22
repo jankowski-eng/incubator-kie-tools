@@ -98,21 +98,21 @@ await settle(900);
 const report = await text("#report");
 ok(
   "fixture imports: 6 nodes, 6 requirements, 3 types",
-  (await count("#scene g[data-id]")) === 7 &&
-    (await count("#scene line.vis")) === 7 &&
-    report.includes("imported 6 nodes, 6 requirements, 3 data types, 1 annotation"),
+  (await count("#scene g[data-id]")) === 8 &&
+    (await count("#scene line.vis")) === 8 &&
+    report.includes("imported 6 nodes, 6 requirements, 3 data types, 1 annotation, 1 knowledge source"),
   report.slice(0, 160)
 );
 ok(
-  "report lists what is kept as in the file",
-  ["knowledgeSource", "authorityRequirement", "Fee: invocation to a FEEL function call"].every((k) =>
-    report.includes(k)
-  ) &&
+  "report lists what is converted, and no longer annotations, sources or their links",
+  report.includes("Fee: invocation to a FEEL function call") &&
+    !report.includes("knowledgeSource") &&
     !report.includes("textAnnotation") &&
+    !report.includes("authorityRequirement") &&
     !report.includes("association"),
   report
 );
-ok("shapeless elements placed automatically", report.includes("2 placed automatically"));
+ok("shapeless elements placed automatically", report.includes("3 placed automatically"));
 ok(
   "file positions are kept (Applicant Data at 40,320)",
   (await page.locator('#scene [data-id="_app"]').getAttribute("transform")) === "translate(40 320)",
@@ -159,9 +159,7 @@ await settle(900);
 const report2 = await text("#report");
 ok(
   "exporting the imported fixture and importing again loses nothing",
-  report2.includes("imported 6 nodes, 6 requirements, 3 data types") &&
-    !report2.includes("Lost when saving") &&
-    report2.includes("knowledgeSource"),
+  report2.includes("imported 6 nodes, 6 requirements, 3 data types") && !report2.includes("Lost when saving"),
   report2.slice(0, 160)
 );
 await page.screenshot({ path: `${OUT}/x2.png` });

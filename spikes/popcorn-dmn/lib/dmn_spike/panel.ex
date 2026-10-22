@@ -20,6 +20,15 @@ defmodule DmnSpike.Panel do
       ~s|<dl><dt>Describes</dt><dd>#{chips(linked, "No element yet. Drag from the blue handle to one.")}</dd></dl></div>|
   end
 
+  defp artifact(m, %{type: :source} = node) do
+    {from, to} = Model.authorities(m, node.id)
+
+    ~s|<div class="props"><div class="srchead"><label class="desc">Name<input class="nname" data-op="nname" data-id="#{node.id}" value="#{Fmt.esc(node.name)}" spellcheck="false"/></label>| <>
+      ~s|<label class="desc">Description<textarea data-op="ndesc" data-id="#{node.id}" rows="4" placeholder="Where does this authority come from?" spellcheck="true">#{Fmt.esc(Model.description(node))}</textarea></label></div>| <>
+      ~s|<dl><dt>Kind</dt><dd>knowledge source</dd><dt>ID</dt><dd><code>#{Fmt.esc(node.id)}</code></dd>| <>
+      ~s|<dt>Takes authority from</dt><dd>#{chips(from, "none")}</dd><dt>Authority for</dt><dd>#{chips(to, "none")}</dd></dl></div>|
+  end
+
   defp chips([], none), do: ~s|<span class="none">#{none}</span>|
 
   defp chips(list, _none),

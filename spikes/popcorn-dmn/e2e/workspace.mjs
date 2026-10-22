@@ -32,7 +32,7 @@ const panel = await page.locator("#panel table").first().boundingBox();
 ok("canvas and the editing table are visible together", stage.y + stage.height < 720 && panel.y < 720, `${panel.y}`);
 
 // selecting a node shows its expression in the dock without scrolling
-await page.locator('#scene g[data-id="risk"]').click();
+await page.locator('#scene g[data-id="risk"] .shape').click();
 await settle();
 ok("selecting a node shows its table in view", (await page.locator("table.dt").first().boundingBox()).y < 720);
 
@@ -56,7 +56,7 @@ await page.keyboard.press("Escape");
 ok("Escape closes it", await page.locator("#help").isHidden());
 
 // rename by double-click and F2
-await page.locator('#scene g[data-id="front"]').dblclick();
+await page.locator('#scene g[data-id="front"] .shape').dblclick();
 await settle(800);
 ok(
   "double-click focuses the name field",
@@ -64,7 +64,7 @@ ok(
   await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))
 );
 await page.locator("#drd").click({ position: { x: 5, y: 200 } });
-await page.locator('#scene g[data-id="front"]').click();
+await page.locator('#scene g[data-id="front"] .shape').click();
 await settle();
 await page.evaluate(() => document.activeElement?.blur());
 await page.keyboard.press("F2");
@@ -81,9 +81,9 @@ await settle(600);
 ok("undo brings it back", (await count("#scene g[data-id]")) === n0);
 
 // create-and-connect pad
-await page.locator('#scene g[data-id="front"]').click();
+await page.locator('#scene g[data-id="front"] .shape').click();
 await settle();
-ok("a selected decision offers 4 things to create", (await count("#pad-front [data-create]")) === 4);
+ok("a selected decision offers 5 things to create", (await count("#pad-front [data-create]")) === 5);
 const nn = await count("#scene g[data-id]"),
   ne = await count("#scene line.vis");
 await page.locator('#pad-front [data-create="input"]').click();
@@ -105,15 +105,15 @@ ok("the old pad is gone", (await count("#pad-front [data-create]")) === 0);
 await page.locator("[data-click=undo]").click();
 await settle(600);
 ok("undo removes node and edge", (await count("#scene g[data-id]")) === nn && (await count("#scene line.vis")) === ne);
-await page.locator('#scene g[data-id="dti"]').click();
+await page.locator('#scene g[data-id="dti"] .shape').click();
 await settle();
 ok(
-  "a business knowledge model offers business knowledge and an annotation",
-  (await count("#pad-dti [data-create]")) === 2
+  "a business knowledge model offers business knowledge, a source and an annotation",
+  (await count("#pad-dti [data-create]")) === 3
 );
 
 // text annotations
-await page.locator('#scene g[data-id="front"]').click();
+await page.locator('#scene g[data-id="front"] .shape').click();
 await settle();
 const an = await count("#scene g[data-id]"),
   ae = await count("#scene line.vis");
@@ -175,8 +175,65 @@ ok("an annotation can be dragged in from the palette", (await count("#scene g.an
 await page.locator("[data-click=undo]").click();
 await settle(500);
 
+// knowledge sources
+await page.locator('#scene g[data-id="loan"] .shape').click();
+await settle();
+const sn = await count("#scene g[data-id]"),
+  se = await count("#scene line.vis");
+await page.locator('#pad-loan [data-create="source"]').click();
+await settle(800);
+ok(
+  "the pad creates a knowledge source joined by an authority requirement",
+  (await count("#scene g[data-id]")) === sn + 1 &&
+    (await count("#scene line.vis")) === se + 1 &&
+    (await count("#scene g.source")) === 1
+);
+const sid = await page.locator("#scene g.source").getAttribute("data-id");
+const lastLine = page.locator("#scene g.edge").last().locator("line.vis");
+ok(
+  "the authority line is dashed and ends in a dot",
+  (await lastLine.getAttribute("marker-end")) === "url(#dot)" &&
+    (await lastLine.getAttribute("stroke-dasharray")) !== null
+);
+ok("a source shows no value", (await text(`#nv-${sid}`)) === "");
+ok(
+  "its panel has a name field and a description",
+  (await count(".props input.nname")) === 1 && (await count('textarea[data-op="ndesc"]')) === 1
+);
+await page.locator(".props input.nname").fill("Credit Bureau");
+await settle(400);
+ok("renaming shows in the diagram", (await text(`#nm-${sid}`)) === "Credit Bureau");
+await page.locator('textarea[data-op="ndesc"]').fill("Where the score comes from");
+await settle(400);
+ok("a description gives it an info badge", (await count(`#scene g[data-id="${sid}"] .info`)) === 1);
+ok("the panel links back to the decision", (await text(".props dl")).includes("Loan Pre-Qualification"));
+// join an input to the source with the handle
+await page.locator('#scene g[data-id="app"] .shape').click();
+await settle(300);
+const hh = await page.locator('#scene g[data-id="app"] .handle').boundingBox();
+const tt = await page.locator(`#scene g[data-id="${sid}"] .shape`).boundingBox();
+await page.mouse.move(hh.x + hh.width / 2, hh.y + hh.height / 2);
+await page.mouse.down();
+await page.mouse.move(tt.x + tt.width / 2, tt.y + tt.height / 2, { steps: 6 });
+await page.mouse.up();
+await settle(600);
+ok("an input can be joined to the source as its authority", (await count("#scene line.vis")) === se + 2);
+await page.locator('[data-click="tab:xml"]').click();
+await settle(500);
+ok(
+  "the XML has the source and both authority requirements",
+  (await text("#xml")).includes("<knowledgeSource") &&
+    (await text("#xml")).includes("<requiredAuthority") &&
+    (await text("#xml")).includes('<requiredInput href="#app"/>')
+);
+await page.locator('[data-click="tab:editor"]').click();
+await settle();
+await page.dragAndDrop('#palette [data-kind="source"]', "#drd", { targetPosition: { x: 120, y: 120 } });
+await settle(600);
+ok("a source can be dragged in from the palette", (await count("#scene g.source")) === 2);
+
 // type pill
-await page.locator('#scene g[data-id="front"]').click();
+await page.locator('#scene g[data-id="front"] .shape').click();
 await settle();
 ok("selected node shows its data type", (await text("#scene g[data-id=front] .tpill text")) === "tRatio");
 await page.locator("#scene g[data-id=front] .tpill").click();
@@ -190,7 +247,7 @@ await settle(500);
 ok("undo restores it", (await text("#scene g[data-id=front] .tpill text")) === "tRatio");
 
 // properties tab: description, identity, wiring
-await page.locator('#scene g[data-id="front"]').click();
+await page.locator('#scene g[data-id="front"] .shape').click();
 await settle();
 ok("no info badge without a description", (await count("#scene g[data-id=front] .info")) === 0);
 await page.locator('[data-click="dock:props"]').click();
@@ -239,7 +296,7 @@ await settle();
 ok("Expression tab brings the table back", (await count("table.boxed, table.dt")) >= 1);
 
 // Enter moves down a decision-table column
-await page.locator('#scene g[data-id="risk"]').click();
+await page.locator('#scene g[data-id="risk"] .shape').click();
 await settle();
 const cells = page.locator('table.dt tbody textarea[data-op="dtcell"]');
 await cells.first().focus();

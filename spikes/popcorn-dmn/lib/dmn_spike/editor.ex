@@ -701,8 +701,8 @@ defmodule DmnSpike.Editor do
       for {nid, node} <- state.model.nodes, r = results[nid], reduce: [] do
         acc ->
           [
-            ["html", "#nv-#{nid}", Svg.node_value_text(r)],
-            ["html", "#tt-#{nid}", Svg.node_title(r)],
+            ["html", "#nv-#{nid}", if(Model.artifact?(node), do: "", else: Svg.node_value_text(r))],
+            ["html", "#tt-#{nid}", if(Model.artifact?(node), do: "", else: Svg.node_title(r))],
             ["attr", ~s|[data-id="#{nid}"]|, "class", Svg.node_class(nid == state.selected, r.errors != [], node.type)]
             | acc
           ] ++ if(node.id == state.selected, do: [["html", "#nerr-#{nid}", Panel.errors_html(r)]], else: [])

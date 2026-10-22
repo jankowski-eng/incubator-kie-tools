@@ -17,7 +17,7 @@ defmodule DmnSpike.Dmn.Overlay do
 
   alias DmnSpike.{Dmn, Model, Svg}
 
-  @elements ~w(inputData decision businessKnowledgeModel textAnnotation)
+  @elements ~w(inputData decision businessKnowledgeModel textAnnotation knowledgeSource)
   @expr_tags ~w(literalExpression context decisionTable invocation relation functionDefinition list conditional filter for some every)
 
   # the order of children DMN's schema prescribes (unknown children go before the expression)
@@ -25,6 +25,7 @@ defmodule DmnSpike.Dmn.Overlay do
     decision:
       ~w(extensionElements description question allowedAnswers variable informationRequirement knowledgeRequirement authorityRequirement supportedObjective impactedPerformanceIndicator decisionMaker decisionOwner usingProcess usingTask),
     input: ~w(extensionElements description variable),
+    source: ~w(extensionElements description type owner locationURI authorityRequirement),
     bkm: ~w(extensionElements description variable encapsulatedLogic knowledgeRequirement authorityRequirement),
     item: ~w(extensionElements description typeRef itemComponent allowedValues typeConstraint functionItem)
   }
@@ -127,15 +128,21 @@ defmodule DmnSpike.Dmn.Overlay do
   @doc "What decides whether an element has been edited: its modelled content and its incoming requirements."
   def fingerprint(%Model{} = m, node) do
     {node.name, node.type, node.type_ref, Model.description(node), node.expr,
-     for({f, t, k} <- m.edges, t == node.id, do: {f, k}) |> Enum.sort()}
+     for({f, t, k} <- Model.edges_all(m), t == node.id, k != :association, do: {f, k}) |> Enum.sort()}
   end
+
+  @req_tags %{
+    "informationRequirement" => :info,
+    "knowledgeRequirement" => :knowledge,
+    "authorityRequirement" => :authority
+  }
 
   defp req_ids({_, _, kids}) do
     for {t, a, rk} <- Enum.filter(kids, &is_tuple/1),
-        Dmn.local(t) in ["informationRequirement", "knowledgeRequirement"],
+        kind = @req_tags[Dmn.local(t)],
         id = Dmn.attr(a, "id"),
         into: %{} do
-      {{req_from(rk), if(Dmn.local(t) == "informationRequirement", do: :info, else: :knowledge)}, id}
+      {{req_from(rk), kind}, id}
     end
   end
 
@@ -285,7 +292,9 @@ defmodule DmnSpike.Dmn.Overlay do
       |> Enum.sort_by(& &1.id)
       |> Enum.map(&q(Dmn.node_xml(m, &1), pre))
 
-    new_links = m.links |> Enum.reject(&Map.has_key?(doc.links, &1)) |> Enum.map(&q(Dmn.link_xml(&1), pre))
+    new_links =
+      for({_, _, :association} = l <- m.links, not Map.has_key?(doc.links, l), do: l)
+      |> Enum.map(&q(Dmn.link_xml(&1), pre))
 
     indexed = Enum.with_index(doc.children)
     idx = fn pred -> indexed |> Enum.filter(fn {mk, _} -> pred.(mk) end) |> Enum.map(&elem(&1, 1)) end
@@ -352,6 +361,43 @@ defmodule DmnSpike.Dmn.Overlay do
     end
   end
 
+  defp raw_requirements(raw),
+    do: for({t, _, rk} = r <- raw, kind = @req_tags[Dmn.local(t)], into: %{}, do: {{req_from(rk), kind}, r})
+
+  # incoming requirements, original elements where they still exist (ids and attributes kept), new ones generated
+  defp requirements_out(m, node, raw_reqs, pre) do
+    for {from, to, kind} <- Model.edges_all(m), to == node.id, kind != :association do
+      case raw_reqs[{from, kind}] do
+        nil -> q(Dmn.req_xml(m, from, to, kind), pre)
+        r -> from_simple(r)
+      end
+    end
+  end
+
+  defp fresh_description(node, pre),
+    do: if(Model.description(node) == "", do: [], else: [q(Dmn.el("description", [], [node.description]), pre)])
+
+  defp regen_node(m, %{type: :source} = node, %{raw: {tag, attrs, kids}}, pre) do
+    raw = Enum.filter(kids, &is_tuple/1)
+    named = fn name -> Enum.filter(raw, &(Dmn.local(elem(&1, 0)) == name)) end
+    reqs = requirements_out(m, node, raw_requirements(raw), pre)
+
+    description =
+      case named.("description") do
+        [r | _] ->
+          if Dmn.text(r) == Model.description(node),
+            do: [from_simple(r)],
+            else: fresh_description(node, pre)
+
+        [] ->
+          fresh_description(node, pre)
+      end
+
+    others = for r <- raw, Dmn.local(elem(r, 0)) not in ["description", "authorityRequirement"], do: from_simple(r)
+    attrs = put_attrs(attrs, [{"id", node.id}, {"name", node.name}])
+    {:el, tag, attrs, sort_children(description ++ reqs ++ others, :source)}
+  end
+
   defp regen_node(_m, %{type: :annotation} = node, %{raw: {tag, attrs, kids}}, pre) do
     raw = Enum.filter(kids, &is_tuple/1)
     others = for r <- raw, Dmn.local(elem(r, 0)) != "text", do: from_simple(r)
@@ -384,18 +430,8 @@ defmodule DmnSpike.Dmn.Overlay do
           fresh.("variable")
       end
 
-    raw_reqs =
-      for {t, _, rk} = r <- raw, Dmn.local(t) in ["informationRequirement", "knowledgeRequirement"], into: %{} do
-        {{req_from(rk), if(Dmn.local(t) == "informationRequirement", do: :info, else: :knowledge)}, r}
-      end
-
-    reqs =
-      for {from, to, kind} <- m.edges, to == node.id do
-        case raw_reqs[{from, kind}] do
-          nil -> q(Dmn.req_xml(m, from, to, kind), pre)
-          r -> from_simple(r)
-        end
-      end
+    raw_reqs = raw_requirements(raw)
+    reqs = requirements_out(m, node, raw_reqs, pre)
 
     expression =
       cond do
@@ -422,6 +458,7 @@ defmodule DmnSpike.Dmn.Overlay do
         "description",
         "informationRequirement",
         "knowledgeRequirement",
+        "authorityRequirement",
         "extensionElements",
         "encapsulatedLogic"
       ] ++
