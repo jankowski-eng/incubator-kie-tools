@@ -17,7 +17,18 @@ defmodule DmnSpike.Model do
   }
 
   # `anchors` maps `{from, to}` to the side (:top | :right | :bottom | :left) of `to` the edge arrives at
-  defstruct nodes: %{}, edges: [], links: [], types: [], next: 1, doc: nil, anchors: %{}
+  # Scenarios are named sets of input values (test data). They are not part of the DMN file. The values of
+  # the active one (`scenario`) live on the input nodes, where they are edited; `scenarios/1` gives the list
+  # with those live values filled in.
+  defstruct nodes: %{},
+            edges: [],
+            links: [],
+            types: [],
+            next: 1,
+            doc: nil,
+            anchors: %{},
+            scenarios: [%{name: "Scenario 1", values: %{}}],
+            scenario: 0
 
   def sample do
     nodes =
@@ -118,6 +129,117 @@ defmodule DmnSpike.Model do
   def hit_policies, do: @hit_policies
 
   def kind(%{expr: expr}), do: Map.get(expr, :kind, :context)
+
+  # --- scenarios (test data, kept outside the file) -----------------------------------------
+
+  @doc "The values on the input nodes now, by node id."
+  def input_values(%__MODULE__{} = m), do: for({id, %{type: :input} = n} <- m.nodes, into: %{}, do: {id, n.expr.result})
+
+  @doc "All scenarios, the active one with the values on the canvas."
+  def scenarios(%__MODULE__{} = m),
+    do: List.update_at(m.scenarios, m.scenario, &%{&1 | values: input_values(m)})
+
+  defp load_values(%__MODULE__{} = m, values) do
+    nodes =
+      Map.new(m.nodes, fn
+        {id, %{type: :input} = n} -> {id, put_in(n.expr.result, Map.get(values, id, ""))}
+        other -> other
+      end)
+
+    %{m | nodes: nodes}
+  end
+
+  def switch_scenario(%__MODULE__{} = m, i) do
+    all = scenarios(m)
+
+    if i in 0..(length(all) - 1)//1,
+      do: load_values(%{m | scenarios: all, scenario: i}, Enum.at(all, i).values),
+      else: m
+  end
+
+  @doc "A new scenario that starts as a copy of the current values, and becomes the active one."
+  def new_scenario(%__MODULE__{} = m, name) do
+    all = scenarios(m)
+    name = unique_scenario_name(all, name, "Scenario #{length(all) + 1}")
+    %{m | scenarios: all ++ [%{name: name, values: input_values(m)}], scenario: length(all)}
+  end
+
+  def rename_scenario(%__MODULE__{} = m, i, name) do
+    all = scenarios(m)
+    others = List.delete_at(all, i)
+    name = unique_scenario_name(others, name, Enum.at(all, i).name)
+    %{m | scenarios: List.update_at(all, i, &%{&1 | name: name})}
+  end
+
+  @doc "Removes a scenario (the last one cannot go); the previous one becomes active when the active one is removed."
+  def delete_scenario(%__MODULE__{scenarios: [_]} = m, _i), do: m
+
+  def delete_scenario(%__MODULE__{} = m, i) do
+    all = scenarios(m)
+    rest = List.delete_at(all, i)
+
+    active =
+      cond do
+        i == m.scenario -> max(i - 1, 0)
+        i < m.scenario -> m.scenario - 1
+        true -> m.scenario
+      end
+
+    load_values(%{m | scenarios: rest, scenario: active}, Enum.at(rest, active).values)
+  end
+
+  defp unique_scenario_name(others, name, default) do
+    name = if String.trim(name || "") == "", do: default, else: String.trim(name)
+    taken = MapSet.new(others, & &1.name)
+
+    [name]
+    |> Stream.concat(Stream.map(Stream.iterate(2, &(&1 + 1)), &"#{name} #{&1}"))
+    |> Enum.find(&(not MapSet.member?(taken, &1)))
+  end
+
+  @doc "The scenarios as plain data for a file: values are keyed by the name of the input."
+  def export_scenarios(%__MODULE__{} = m) do
+    names = for {id, %{type: :input} = n} <- m.nodes, into: %{}, do: {id, n.name}
+
+    %{
+      "format" => "popcorn-dmn-scenarios",
+      "scenarios" =>
+        for s <- scenarios(m) do
+          %{"name" => s.name, "inputs" => for({id, text} <- s.values, names[id], into: %{}, do: {names[id], text})}
+        end
+    }
+  end
+
+  @doc """
+  Replaces the scenarios with those of `data` (as `export_scenarios/1` writes them); inputs are matched by
+  name. Returns `{:ok, model, unmatched}`, `unmatched` being how many values had no input of that name.
+  """
+  def import_scenarios(%__MODULE__{} = m, %{"scenarios" => [_ | _] = list}) do
+    ids = for {id, %{type: :input} = n} <- m.nodes, into: %{}, do: {n.name, id}
+
+    if Enum.all?(list, &valid_scenario?/1) do
+      {scenarios, unmatched} =
+        Enum.map_reduce(list, 0, fn %{"name" => name, "inputs" => inputs}, miss ->
+          known = for {n, text} <- inputs, ids[n], into: %{}, do: {ids[n], text}
+          {%{name: name, values: known}, miss + map_size(inputs) - map_size(known)}
+        end)
+
+      scenarios =
+        scenarios
+        |> Enum.reduce([], fn s, acc -> acc ++ [%{s | name: unique_scenario_name(acc, s.name, "Scenario")}] end)
+
+      {:ok, load_values(%{m | scenarios: scenarios, scenario: 0}, hd(scenarios).values), unmatched}
+    else
+      {:error, "not a scenarios file"}
+    end
+  end
+
+  def import_scenarios(_m, _data), do: {:error, "not a scenarios file"}
+
+  defp valid_scenario?(%{"name" => name, "inputs" => inputs}) when is_binary(name) and is_map(inputs),
+    do: Enum.all?(inputs, fn {k, v} -> is_binary(k) and is_binary(v) end)
+
+  defp valid_scenario?(_), do: false
 
   # elements of the diagram that are not part of the decision graph: no expression, no value
   @artifacts [:annotation, :source, :group]

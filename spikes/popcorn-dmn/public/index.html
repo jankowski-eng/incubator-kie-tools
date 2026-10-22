@@ -1694,7 +1694,6 @@
         background: var(--danger-soft);
       }
 
-
       /* ---- motion: things arrive and leave instead of switching ------------------ */
       @keyframes fadein {
         from {
@@ -2424,6 +2423,34 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+
+      /* test scenarios: named sets of input values, kept outside the DMN file */
+      #scn-toggle .lbl {
+        font-size: 11px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      #scn-name {
+        max-width: 9rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #scn-list button[aria-checked="true"]::before {
+        content: "✓";
+        margin-right: 0.45rem;
+      }
+      #scn-list button[aria-checked="false"]::before {
+        content: "";
+        display: inline-block;
+        width: 0.95rem;
+      }
+      .menu-items hr {
+        margin: 0.25rem 0;
+        border: 0;
+        border-top: 1px solid var(--border);
+      }
     </style>
   </head>
   <body>
@@ -2433,7 +2460,9 @@
         <span>DMN Editor</span>
       </div>
       <div class="menu" id="file-menu">
-        <button type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="file-items">File<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg></button>
+        <button type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="file-items">
+          File<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
+        </button>
         <div id="file-items" class="menu-items float" role="menu" hidden>
           <button type="button" role="menuitem" data-click="new-dmn">New DMN</button>
           <button type="button" role="menuitem" id="import-item">Import DMN…</button>
@@ -2454,8 +2483,53 @@
         </button>
         <span class="sep"></span>
         <button class="xmlbtn" data-click="xml-toggle" aria-pressed="false" title="Show the XML source">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5.5 2.5 10 7 14.5M13 5.5l4.5 4.5-4.5 4.5M11.3 4 8.7 16" /></svg>XML
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M7 5.5 2.5 10 7 14.5M13 5.5l4.5 4.5-4.5 4.5M11.3 4 8.7 16" /></svg
+          >XML
         </button>
+      </div>
+      <div class="menu" id="scn-menu">
+        <button
+          type="button"
+          id="scn-toggle"
+          aria-haspopup="menu"
+          aria-expanded="false"
+          aria-controls="scn-items"
+          title="Test scenarios: named sets of input values, kept outside the DMN file"
+        >
+          <span class="lbl">Scenario</span> <span id="scn-name">Scenario 1</span
+          ><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
+        </button>
+        <div id="scn-items" class="menu-items float" role="menu" hidden>
+          <div id="scn-list" role="group"></div>
+          <hr />
+          <button
+            type="button"
+            role="menuitem"
+            data-click="scn:new"
+            data-prompt="Name of the new scenario (it starts as a copy of this one)"
+          >
+            New scenario…
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-click="scn:rename"
+            data-prompt="Rename this scenario"
+            data-default="Scenario 1"
+          >
+            Rename…
+          </button>
+          <button type="button" role="menuitem" data-click="scn:delete" disabled>Delete</button>
+          <hr />
+          <button type="button" role="menuitem" data-click="scn:save" title="Download the scenarios as a JSON file">
+            Save scenarios
+          </button>
+          <button type="button" role="menuitem" id="scn-import-item" title="Load scenarios from a JSON file">
+            Load scenarios…
+          </button>
+        </div>
+        <input id="scn-file" type="file" accept=".json,application/json" hidden />
       </div>
       <button id="problems-btn" class="problems" data-level="ok" aria-expanded="false" aria-controls="problems-pop">
         Problems
@@ -2471,140 +2545,227 @@
 
     <main class="page">
       <div class="work">
-      <div id="toast" role="status" hidden></div>
-      <div id="report" class="report"></div>
+        <div id="toast" role="status" hidden></div>
+        <div id="report" class="report"></div>
 
-      <section id="view-editor">
-        <div class="stage">
-          <div id="palette" class="float" role="toolbar" aria-label="Add elements">
-            <div class="pal input" draggable="true" data-kind="input" title="Input data: drag onto the canvas" aria-label="Input data">
-              <svg viewBox="0 0 42 28" aria-hidden="true"><rect x="1" y="1" width="40" height="26" rx="13" /></svg>
-            </div>
-            <div class="pal decision" draggable="true" data-kind="decision" title="Decision: drag onto the canvas" aria-label="Decision">
-              <svg viewBox="0 0 42 28" aria-hidden="true"><rect x="1" y="1" width="40" height="26" rx="3" /></svg>
-            </div>
-            <div class="pal bkm" draggable="true" data-kind="bkm" title="Business knowledge: drag onto the canvas" aria-label="Business knowledge">
-              <svg viewBox="0 0 42 28" aria-hidden="true"><polygon points="8,1 41,1 41,20 34,27 1,27 1,8" stroke-linejoin="round" /></svg>
-            </div>
-            <div class="pal source" draggable="true" data-kind="source" title="Knowledge source: drag onto the canvas" aria-label="Knowledge source">
-              <svg viewBox="0 0 42 28" aria-hidden="true"><path d="M1 1H41V22C33 15 33 29 21 22S9 15 1 22Z" stroke-linejoin="round" /></svg>
-            </div>
-            <div class="pal group" draggable="true" data-kind="group" title="Group: drag onto the canvas" aria-label="Group">
-              <svg viewBox="0 0 42 28" aria-hidden="true"><rect x="1" y="1" width="40" height="26" rx="5" stroke-dasharray="4 3" /></svg>
-            </div>
-            <div class="pal annotation" draggable="true" data-kind="annotation" title="Text annotation: drag onto the canvas" aria-label="Text annotation">
-              <svg viewBox="0 0 42 28" aria-hidden="true"><path d="M12 2H4V26H12" /><path d="M18 9H38M18 14H34M18 19H36" /></svg>
-            </div>
-          </div>
-          <div class="zoomctl float">
-            <button data-click="zoom-in" title="Zoom in" aria-label="Zoom in">+</button
-            ><button data-click="zoom-out" title="Zoom out" aria-label="Zoom out">−</button
-            ><button data-click="fit" title="Fit diagram">Fit</button
-            ><button data-click="layout" title="Arrange nodes in layers">Auto-layout</button
-            ><button id="help-btn" title="How to use the canvas" aria-label="Help" aria-expanded="false">?</button>
-          </div>
-          <div id="help" class="float" hidden>
-            <h4>On the canvas</h4>
-            <ul>
-              <li><b>Add</b> an element: drag it from the palette</li>
-              <li><b>Connect</b>: hover a node and click or drag its blue arrow onto another node</li>
-              <li><b>Create and connect</b>: select a node and use the buttons beside it</li>
-              <li><b>Rename</b>: double-click a node, or press F2</li>
-              <li><b>Delete</b>: the × on a selected node, or the Delete key</li>
-              <li><b>Move around</b>: scroll to zoom, drag the background to pan</li>
-              <li><b>Undo / redo</b>: ⌘Z / ⇧⌘Z</li>
-            </ul>
-          </div>
-          <div id="empty" class="emptystate" hidden>
-            <div class="emptycard" role="region" aria-label="This diagram is empty">
-              <button class="icon close" data-click="empty-dismiss" title="Dismiss" aria-label="Dismiss">
-                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
-              </button>
-              <svg class="cursor" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3 19 11l-6 1.8L9.8 19z" /></svg>
-              <h2>This DMN's diagram is empty</h2>
-              <p>Start by dragging nodes from the palette</p>
-              <p class="or">or</p>
-              <div class="starters">
-                <button class="starter" data-click="empty-add:table">
-                  <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="2" /><path d="M2 8h16M8 8v9" /></svg>New decision table…
-                </button>
-                <button class="starter" data-click="empty-add:decision">
-                  <svg viewBox="0 0 30 22" aria-hidden="true"><rect class="decision" x="3" y="3" width="24" height="16" rx="3" /></svg>New decision…
-                </button>
-                <button class="starter" data-click="empty-add:input">
-                  <svg viewBox="0 0 30 22" aria-hidden="true"><rect class="input" x="3" y="3" width="24" height="16" rx="8" /></svg>New input data…
-                </button>
+        <section id="view-editor">
+          <div class="stage">
+            <div id="palette" class="float" role="toolbar" aria-label="Add elements">
+              <div
+                class="pal input"
+                draggable="true"
+                data-kind="input"
+                title="Input data: drag onto the canvas"
+                aria-label="Input data"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true"><rect x="1" y="1" width="40" height="26" rx="13" /></svg>
+              </div>
+              <div
+                class="pal decision"
+                draggable="true"
+                data-kind="decision"
+                title="Decision: drag onto the canvas"
+                aria-label="Decision"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true"><rect x="1" y="1" width="40" height="26" rx="3" /></svg>
+              </div>
+              <div
+                class="pal bkm"
+                draggable="true"
+                data-kind="bkm"
+                title="Business knowledge: drag onto the canvas"
+                aria-label="Business knowledge"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true">
+                  <polygon points="8,1 41,1 41,20 34,27 1,27 1,8" stroke-linejoin="round" />
+                </svg>
+              </div>
+              <div
+                class="pal source"
+                draggable="true"
+                data-kind="source"
+                title="Knowledge source: drag onto the canvas"
+                aria-label="Knowledge source"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true">
+                  <path d="M1 1H41V22C33 15 33 29 21 22S9 15 1 22Z" stroke-linejoin="round" />
+                </svg>
+              </div>
+              <div
+                class="pal group"
+                draggable="true"
+                data-kind="group"
+                title="Group: drag onto the canvas"
+                aria-label="Group"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true">
+                  <rect x="1" y="1" width="40" height="26" rx="5" stroke-dasharray="4 3" />
+                </svg>
+              </div>
+              <div
+                class="pal annotation"
+                draggable="true"
+                data-kind="annotation"
+                title="Text annotation: drag onto the canvas"
+                aria-label="Text annotation"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true">
+                  <path d="M12 2H4V26H12" />
+                  <path d="M18 9H38M18 14H34M18 19H36" />
+                </svg>
               </div>
             </div>
+            <div class="zoomctl float">
+              <button data-click="zoom-in" title="Zoom in" aria-label="Zoom in">+</button
+              ><button data-click="zoom-out" title="Zoom out" aria-label="Zoom out">−</button
+              ><button data-click="fit" title="Fit diagram">Fit</button
+              ><button data-click="layout" title="Arrange nodes in layers">Auto-layout</button
+              ><button id="help-btn" title="How to use the canvas" aria-label="Help" aria-expanded="false">?</button>
+            </div>
+            <div id="help" class="float" hidden>
+              <h4>On the canvas</h4>
+              <ul>
+                <li><b>Add</b> an element: drag it from the palette</li>
+                <li><b>Connect</b>: hover a node and click or drag its blue arrow onto another node</li>
+                <li><b>Create and connect</b>: select a node and use the buttons beside it</li>
+                <li><b>Rename</b>: double-click a node, or press F2</li>
+                <li><b>Delete</b>: the × on a selected node, or the Delete key</li>
+                <li><b>Move around</b>: scroll to zoom, drag the background to pan</li>
+                <li><b>Undo / redo</b>: ⌘Z / ⇧⌘Z</li>
+              </ul>
+            </div>
+            <div id="empty" class="emptystate" hidden>
+              <div class="emptycard" role="region" aria-label="This diagram is empty">
+                <button class="icon close" data-click="empty-dismiss" title="Dismiss" aria-label="Dismiss">
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
+                </button>
+                <svg class="cursor" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3 19 11l-6 1.8L9.8 19z" /></svg>
+                <h2>This DMN's diagram is empty</h2>
+                <p>Start by dragging nodes from the palette</p>
+                <p class="or">or</p>
+                <div class="starters">
+                  <button class="starter" data-click="empty-add:table">
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <rect x="2" y="3" width="16" height="14" rx="2" />
+                      <path d="M2 8h16M8 8v9" /></svg
+                    >New decision table…
+                  </button>
+                  <button class="starter" data-click="empty-add:decision">
+                    <svg viewBox="0 0 30 22" aria-hidden="true">
+                      <rect class="decision" x="3" y="3" width="24" height="16" rx="3" /></svg
+                    >New decision…
+                  </button>
+                  <button class="starter" data-click="empty-add:input">
+                    <svg viewBox="0 0 30 22" aria-hidden="true">
+                      <rect class="input" x="3" y="3" width="24" height="16" rx="8" /></svg
+                    >New input data…
+                  </button>
+                </div>
+              </div>
+            </div>
+            <svg id="drd" viewBox="0 0 820 370" preserveAspectRatio="xMidYMin meet">
+              <defs>
+                <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+                  <circle cx="1" cy="1" r="1" />
+                </pattern>
+                <marker
+                  id="arrow-fill"
+                  viewBox="0 0 10 10"
+                  refX="10"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0 0L10 5L0 10z" />
+                </marker>
+                <marker id="dot" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7">
+                  <circle cx="5" cy="5" r="4" />
+                </marker>
+                <marker
+                  id="arrow-open"
+                  viewBox="0 0 10 10"
+                  refX="10"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0 0L10 5L0 10" fill="none" stroke-width="1.5" />
+                </marker>
+              </defs>
+              <rect id="grid" x="-50000" y="-50000" width="100000" height="100000" fill="url(#dots)" />
+              <g id="scene"></g>
+              <g id="preview"></g>
+            </svg>
           </div>
-          <svg id="drd" viewBox="0 0 820 370" preserveAspectRatio="xMidYMin meet">
-            <defs>
-              <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
-                <circle cx="1" cy="1" r="1" />
-              </pattern>
-              <marker
-                id="arrow-fill"
-                viewBox="0 0 10 10"
-                refX="10"
-                refY="5"
-                markerWidth="8"
-                markerHeight="8"
-                orient="auto-start-reverse"
-              >
-                <path d="M0 0L10 5L0 10z" />
-              </marker>
-              <marker id="dot" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7">
-                <circle cx="5" cy="5" r="4" />
-              </marker>
-              <marker
-                id="arrow-open"
-                viewBox="0 0 10 10"
-                refX="10"
-                refY="5"
-                markerWidth="8"
-                markerHeight="8"
-                orient="auto-start-reverse"
-              >
-                <path d="M0 0L10 5L0 10" fill="none" stroke-width="1.5" />
-              </marker>
-            </defs>
-            <rect id="grid" x="-50000" y="-50000" width="100000" height="100000" fill="url(#dots)" />
-            <g id="scene"></g>
-            <g id="preview"></g>
-          </svg>
-        </div>
-        <div id="dock" class="float">
-          <div id="splitter" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize, double-click to enlarge"></div>
-          <div id="panel"></div>
-        </div>
-      </section>
+          <div id="dock" class="float">
+            <div
+              id="splitter"
+              role="separator"
+              aria-orientation="horizontal"
+              tabindex="0"
+              title="Drag to resize, double-click to enlarge"
+            ></div>
+            <div id="panel"></div>
+          </div>
+        </section>
 
-      <section id="view-types" hidden><div id="types"></div></section>
+        <section id="view-types" hidden><div id="types"></div></section>
       </div>
 
       <aside id="xmlpane" aria-label="XML source">
-        <div class="xresize" role="separator" aria-orientation="vertical" aria-label="Resize the XML panel" tabindex="0"></div>
+        <div
+          class="xresize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the XML panel"
+          tabindex="0"
+        ></div>
         <div class="xmain">
           <div class="xhead">
             <b>XML</b><small id="xinfo"></small><span class="grow"></span>
             <button class="icon" id="xwrap" aria-pressed="false" title="Word wrap" aria-label="Word wrap">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h11a2.5 2.5 0 0 1 0 5H11m0 0 2-2m-2 2 2 2M3 15h4" /></svg>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M3 5h14M3 10h11a2.5 2.5 0 0 1 0 5H11m0 0 2-2m-2 2 2 2M3 15h4" />
+              </svg>
             </button>
             <button class="icon" id="xcopy" title="Copy the XML" aria-label="Copy the XML">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="9" height="10" rx="1.5" /><path d="M13 7V4.5A1.5 1.5 0 0 0 11.5 3h-6A1.5 1.5 0 0 0 4 4.5v8A1.5 1.5 0 0 0 5.5 14H7" /></svg>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <rect x="7" y="7" width="9" height="10" rx="1.5" />
+                <path d="M13 7V4.5A1.5 1.5 0 0 0 11.5 3h-6A1.5 1.5 0 0 0 4 4.5v8A1.5 1.5 0 0 0 5.5 14H7" />
+              </svg>
             </button>
-            <button class="icon" id="xexpand" aria-pressed="false" title="Use the whole width" aria-label="Use the whole width">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 3h5v5M8 17H3v-5M17 3l-5.5 5.5M3 17l5.5-5.5" /></svg>
+            <button
+              class="icon"
+              id="xexpand"
+              aria-pressed="false"
+              title="Use the whole width"
+              aria-label="Use the whole width"
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M12 3h5v5M8 17H3v-5M17 3l-5.5 5.5M3 17l5.5-5.5" />
+              </svg>
             </button>
             <button class="icon" data-click="xml-toggle" title="Close" aria-label="Close the XML panel">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
             </button>
           </div>
           <div class="xsearch">
-            <input id="xsearch" type="search" placeholder="Find in the XML" spellcheck="false" aria-label="Find in the XML" />
+            <input
+              id="xsearch"
+              type="search"
+              placeholder="Find in the XML"
+              spellcheck="false"
+              aria-label="Find in the XML"
+            />
             <span id="xcount" aria-live="polite"></span>
-            <button class="icon" id="xprev" title="Previous match" aria-label="Previous match"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 12 5-5 5 5" /></svg></button>
-            <button class="icon" id="xnext" title="Next match" aria-label="Next match"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5" /></svg></button>
+            <button class="icon" id="xprev" title="Previous match" aria-label="Previous match">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 12 5-5 5 5" /></svg>
+            </button>
+            <button class="icon" id="xnext" title="Next match" aria-label="Next match">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5" /></svg>
+            </button>
           </div>
           <div id="xcode" tabindex="0" role="region" aria-label="XML source, read only"></div>
         </div>
@@ -2631,18 +2792,57 @@
         items.addEventListener("click", () => set(false));
         menu.querySelector("#import-item").addEventListener("click", () => menu.querySelector("#file").click());
       })();
+
+      // Scenario menu: pure UI too; the choices and actions are data-click handlers of the editor.
+      (() => {
+        const menu = document.querySelector("#scn-menu"),
+          toggle = menu.querySelector("#scn-toggle"),
+          items = menu.querySelector("#scn-items");
+        const set = (open) => {
+          items.hidden = !open;
+          toggle.setAttribute("aria-expanded", String(open));
+        };
+        toggle.addEventListener("click", () => set(items.hidden));
+        document.addEventListener("click", (e) => {
+          if (!menu.contains(e.target)) set(false);
+        });
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") set(false);
+        });
+        items.addEventListener("click", (e) => {
+          if (e.target.closest("button:not(:disabled)")) set(false);
+        });
+        menu.querySelector("#scn-import-item").addEventListener("click", () => menu.querySelector("#scn-file").click());
+      })();
     </script>
     <script>
       // XML inspector: resize, expand, fold, find, wrap and copy. The code and the highlight of the selected
       // element arrive from the editor (window.xmlPane.set / .select); clicks on the code go back to it.
       (() => {
         const $ = (s) => document.querySelector(s);
-        const page = $(".page"), pane = $("#xmlpane"), code = $("#xcode");
+        const page = $(".page"),
+          pane = $("#xmlpane"),
+          code = $("#xcode");
         const store = {
-          get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
-          set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+          get: (k) => {
+            try {
+              return localStorage.getItem(k);
+            } catch {
+              return null;
+            }
+          },
+          set: (k, v) => {
+            try {
+              localStorage.setItem(k, v);
+            } catch {}
+          },
         };
-        let lines = [], folds = new Map(), folded = new Set(), selected = null, matches = [], cur = -1;
+        let lines = [],
+          folds = new Map(),
+          folded = new Set(),
+          selected = null,
+          matches = [],
+          cur = -1;
 
         // width: remembered as a share of the page, so it survives a window resize
         const w0 = store.get("xml.w");
@@ -2653,7 +2853,11 @@
           pane.style.setProperty("--xw", Math.round((w / total) * 1000) / 10 + "%");
         };
         const grip = $(".xresize");
-        grip.addEventListener("pointerdown", (e) => { grip.setPointerCapture(e.pointerId); grip.classList.add("drag"); pane.classList.add("resizing"); });
+        grip.addEventListener("pointerdown", (e) => {
+          grip.setPointerCapture(e.pointerId);
+          grip.classList.add("drag");
+          pane.classList.add("resizing");
+        });
         grip.addEventListener("pointermove", (e) => {
           if (grip.classList.contains("drag")) setW(page.getBoundingClientRect().right - e.clientX);
         });
@@ -2673,21 +2877,36 @@
           const on = page.classList.toggle("xexp");
           e.currentTarget.setAttribute("aria-pressed", String(on));
         });
-        const wrap = (on) => { code.classList.toggle("wrap", on); $("#xwrap").setAttribute("aria-pressed", String(on)); };
+        const wrap = (on) => {
+          code.classList.toggle("wrap", on);
+          $("#xwrap").setAttribute("aria-pressed", String(on));
+        };
         wrap(store.get("xml.wrap") === "1");
-        $("#xwrap").addEventListener("click", () => { const on = !code.classList.contains("wrap"); wrap(on); store.set("xml.wrap", on ? "1" : "0"); });
+        $("#xwrap").addEventListener("click", () => {
+          const on = !code.classList.contains("wrap");
+          wrap(on);
+          store.set("xml.wrap", on ? "1" : "0");
+        });
 
         // copy the whole document: the text of every line, as written
         $("#xcopy").addEventListener("click", async (e) => {
           const b = e.currentTarget; // gone once the clipboard promise has been awaited
           const text = [...code.querySelectorAll(".xc")].map((c) => c.textContent).join("\n") + "\n";
-          try { await navigator.clipboard.writeText(text); }
-          catch {
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch {
             const t = Object.assign(document.createElement("textarea"), { value: text });
-            document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove();
+            document.body.appendChild(t);
+            t.select();
+            document.execCommand("copy");
+            t.remove();
           }
-          b.dataset.done = "1"; b.title = "Copied";
-          setTimeout(() => { delete b.dataset.done; b.title = "Copy the XML"; }, 1400);
+          b.dataset.done = "1";
+          b.title = "Copied";
+          setTimeout(() => {
+            delete b.dataset.done;
+            b.title = "Copy the XML";
+          }, 1400);
         });
 
         // folding: an element is hidden by hiding the lines after its first one
@@ -2697,7 +2916,8 @@
             const to = folds.get(from);
             for (let n = from + 1; n <= to; n++) lines[n - 1].hidden = true;
           }
-          for (const g of code.querySelectorAll(".xg[data-to]")) g.classList.toggle("folded", folded.has(+g.closest(".xl").dataset.n));
+          for (const g of code.querySelectorAll(".xg[data-to]"))
+            g.classList.toggle("folded", folded.has(+g.closest(".xl").dataset.n));
         };
         code.addEventListener("click", (e) => {
           const g = e.target.closest(".xg[data-to]");
@@ -2709,11 +2929,16 @@
         // make a line visible by opening the elements that contain it
         const reveal = (n) => {
           let changed = false;
-          for (const f of [...folded]) if (f < n && folds.get(f) >= n) { folded.delete(f); changed = true; }
+          for (const f of [...folded])
+            if (f < n && folds.get(f) >= n) {
+              folded.delete(f);
+              changed = true;
+            }
           if (changed) applyFolds();
         };
         const scrollTo = (n) => {
-          const r = lines[n - 1].getBoundingClientRect(), c = code.getBoundingClientRect();
+          const r = lines[n - 1].getBoundingClientRect(),
+            c = code.getBoundingClientRect();
           code.scrollTop += r.top - c.top - code.clientHeight * 0.18;
         };
 
@@ -2721,25 +2946,40 @@
         const count = $("#xcount");
         const search = (keep) => {
           const q = $("#xsearch").value.toLowerCase();
-          matches = []; cur = -1;
-          CSS.highlights?.delete("xmatch"); CSS.highlights?.delete("xcur");
+          matches = [];
+          cur = -1;
+          CSS.highlights?.delete("xmatch");
+          CSS.highlights?.delete("xcur");
           if (q) {
             for (const c of code.querySelectorAll(".xc")) {
               const t = c.textContent.toLowerCase();
-              for (let i = t.indexOf(q); i !== -1 && matches.length < 2000; i = t.indexOf(q, i + q.length)) matches.push({ c, i, len: q.length });
+              for (let i = t.indexOf(q); i !== -1 && matches.length < 2000; i = t.indexOf(q, i + q.length))
+                matches.push({ c, i, len: q.length });
             }
             CSS.highlights?.set("xmatch", new Highlight(...matches.map(range)));
           }
-          count.textContent = q ? (matches.length ? `${matches.length}${matches.length === 2000 ? "+" : ""}` : "none") : "";
+          count.textContent = q
+            ? matches.length
+              ? `${matches.length}${matches.length === 2000 ? "+" : ""}`
+              : "none"
+            : "";
           if (keep && matches.length) go(1);
         };
         const range = ({ c, i, len }) => {
-          const r = document.createRange(), w = document.createTreeWalker(c, NodeFilter.SHOW_TEXT);
-          let at = 0, start = false;
+          const r = document.createRange(),
+            w = document.createTreeWalker(c, NodeFilter.SHOW_TEXT);
+          let at = 0,
+            start = false;
           for (let n = w.nextNode(); n; n = w.nextNode()) {
             const end = at + n.length;
-            if (!start && i < end) { r.setStart(n, i - at); start = true; }
-            if (start && i + len <= end) { r.setEnd(n, i + len - at); break; }
+            if (!start && i < end) {
+              r.setStart(n, i - at);
+              start = true;
+            }
+            if (start && i + len <= end) {
+              r.setEnd(n, i + len - at);
+              break;
+            }
             at = end;
           }
           return r;
@@ -2747,7 +2987,8 @@
         const go = (d) => {
           if (!matches.length) return;
           cur = (cur + d + matches.length) % matches.length;
-          const m = matches[cur], n = +m.c.closest(".xl").dataset.n;
+          const m = matches[cur],
+            n = +m.c.closest(".xl").dataset.n;
           reveal(n);
           scrollTo(n);
           CSS.highlights?.set("xcur", new Highlight(range(m)));
@@ -2755,13 +2996,25 @@
         };
         $("#xsearch").addEventListener("input", () => search(true));
         $("#xsearch").addEventListener("keydown", (e) => {
-          if (e.key === "Enter") { e.preventDefault(); go(e.shiftKey ? -1 : 1); }
-          if (e.key === "Escape") { e.preventDefault(); e.target.value = ""; search(false); code.focus(); }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            go(e.shiftKey ? -1 : 1);
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.target.value = "";
+            search(false);
+            code.focus();
+          }
         });
         $("#xnext").addEventListener("click", () => go(1));
         $("#xprev").addEventListener("click", () => go(-1));
         pane.addEventListener("keydown", (e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") { e.preventDefault(); $("#xsearch").focus(); $("#xsearch").select(); }
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+            e.preventDefault();
+            $("#xsearch").focus();
+            $("#xsearch").select();
+          }
         });
 
         const mark = () => {
@@ -2777,7 +3030,9 @@
             const top = code.scrollTop;
             code.innerHTML = html;
             lines = [...code.querySelectorAll(".xl")];
-            folds = new Map([...code.querySelectorAll(".xg[data-to]")].map((g) => [+g.closest(".xl").dataset.n, +g.dataset.to]));
+            folds = new Map(
+              [...code.querySelectorAll(".xg[data-to]")].map((g) => [+g.closest(".xl").dataset.n, +g.dataset.to])
+            );
             folded = new Set([...folded].filter((n) => folds.has(n)));
             applyFolds();
             mark();

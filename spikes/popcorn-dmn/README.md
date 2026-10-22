@@ -42,7 +42,9 @@ The model covers only part of DMN, so saving must not damage the rest. `Dmn.Over
 - text annotations, associations, knowledge sources, authority requirements and groups are edited like any other element (untouched ones are written back as they were); decision services and extension elements are **kept untouched** even though the editor does not show them; expression kinds it cannot edit (relation, function, list, aggregated COLLECT tables, ...) are shown read-only and kept; editing an expression merges the new text into the original element, so ids, typeRefs and unknown children stay (as long as the number of columns or rules is unchanged);
 - an `<invocation>` is converted to a FEEL call so it evaluates, but written back as the original `<invocation>` until the expression is edited.
 
-Known limits: comments inside the document (only those before the root are kept), a DOCTYPE, formatting and attribute whitespace are normalised; editing a data type regenerates its components (their ids are not kept); and values typed into _input data_ nodes (test data) are stored in a `spike:value` extension element, which a real product should keep out of the file.
+Known limits: comments inside the document (only those before the root are kept), a DOCTYPE, formatting and attribute whitespace are normalised; editing a data type regenerates its components (their ids are not kept);.
+
+Test data: the values of input data nodes belong to a **scenario**, not to the file. The Scenario menu in the toolbar switches, adds, renames and deletes scenarios (a new one starts as a copy) and saves or loads them as a JSON file keyed by input name (`Save scenarios`, `Load scenarios…`). A file written by an earlier version that holds a `spike:value` extension element opens with that value in the first scenario and loses the element on the next save. Scenarios are not remembered between page loads: save them.
 
 ## Embedding
 
@@ -50,7 +52,7 @@ Where the editor can and cannot run (iframes, popups, VS Code) is measured in [E
 
 ## Verification
 
-`mix test` covers the pure logic (590 tests, 450 of them random-edit round trips validated against DMN16.xsd, including the real KIE sample and the open-and-save guarantees). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, workspace layout and on-canvas actions, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
+`mix test` covers the pure logic (596 tests, 450 of them random-edit round trips validated against DMN16.xsd, including the real KIE sample and the open-and-save guarantees). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, workspace layout and on-canvas actions, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
 
 Notes from building this:
 

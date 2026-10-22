@@ -60,7 +60,7 @@ defmodule DmnSpike.Panel do
         true ->
           case Model.kind(node) do
             :table -> table(m, node, results[id])
-            :context -> context(node, results[id])
+            :context -> context(m, node, results[id])
             :raw -> raw(node)
           end
       end
@@ -98,7 +98,7 @@ defmodule DmnSpike.Panel do
     ]
   end
 
-  defp context(node, result) do
+  defp context(m, node, result) do
     id = node.id
     cells = Model.cells(node) |> Enum.with_index()
 
@@ -116,11 +116,15 @@ defmodule DmnSpike.Panel do
       end
 
     [
-      ~s|<table class="boxed"><thead><tr><th colspan="3">#{Fmt.esc(node.name)} <small>#{kind(node)}</small></th></tr></thead><tbody>|,
+      ~s|<table class="boxed"><thead><tr><th colspan="3">#{Fmt.esc(node.name)} <small>#{kind(node)}#{scenario_hint(m, node)}</small></th></tr></thead><tbody>|,
       rows,
       "</tbody></table>"
     ]
   end
+
+  # an input's value is test data: it belongs to the current scenario, not to the file
+  defp scenario_hint(m, %{type: :input}), do: " · value in “#{Fmt.esc(Enum.at(Model.scenarios(m), m.scenario).name)}”"
+  defp scenario_hint(_m, _node), do: ""
 
   # --- decision table ----------------------------------------------------------------
 

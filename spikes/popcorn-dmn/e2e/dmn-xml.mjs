@@ -44,7 +44,9 @@ await page.waitForFunction(
 // ---- XML inspector
 await page.locator(".xmlbtn").click();
 await settle(600);
-const xml = await page.evaluate(() => [...document.querySelectorAll("#xcode .xc")].map((c) => c.textContent).join("\n") + "\n");
+const xml = await page.evaluate(
+  () => [...document.querySelectorAll("#xcode .xc")].map((c) => c.textContent).join("\n") + "\n"
+);
 ok(
   "XML inspector shows generated DMN",
   xml.startsWith('<?xml version="1.0"') &&
@@ -65,10 +67,7 @@ await page.locator(".xmlbtn").click();
 await settle();
 
 // ---- export download, then import the downloaded file again
-const [dl] = await Promise.all([
-  page.waitForEvent("download", { timeout: 15000 }),
-  exportDmn(),
-]);
+const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 15000 }), exportDmn()]);
 const exported = `${OUT}/exported.dmn`;
 await dl.saveAs(exported);
 const exportedXml = fs.readFileSync(exported, "utf8");
@@ -78,6 +77,23 @@ ok(
   dl.suggestedFilename()
 );
 ok("download equals what the XML tab showed", exportedXml === xml);
+ok("the file holds no test values", !exportedXml.includes("9000") && !exportedXml.includes("spike:value"));
+// the test values are a scenario: saved on their own
+await page.locator("#scn-toggle").click();
+const [sdl] = await Promise.all([
+  page.waitForEvent("download", { timeout: 15000 }),
+  page.getByRole("menuitem", { name: "Save scenarios" }).click(),
+]);
+const scenarios = `${OUT}/exported.scenarios.json`;
+await sdl.saveAs(scenarios);
+const saved = JSON.parse(fs.readFileSync(scenarios, "utf8"));
+ok(
+  "scenarios download as JSON by input name",
+  sdl.suggestedFilename().endsWith(".scenarios.json") &&
+    saved.scenarios.length === 1 &&
+    saved.scenarios[0].inputs["Applicant Data"].includes("Income: 9000"),
+  sdl.suggestedFilename()
+);
 await clickNode('#scene [data-id="app"]');
 await settle(300);
 await page.locator('[data-cell="app:0"]').fill("{Income: 1, Tax: 1, Insurance: 1, Debt: 1}");
@@ -90,12 +106,15 @@ ok(
 await page.locator("#file").setInputFiles(exported);
 await settle(900);
 ok(
-  "re-importing the export restores the model exactly",
-  (await text("#nv-front")) === "22.6673" &&
-    (await count("#scene g[data-id]")) === 8 &&
-    (await count("#scene line.vis")) === 10,
-  await text("#report")
+  "re-importing the export restores the diagram, but not the test values",
+  (await count("#scene g[data-id]")) === 8 &&
+    (await count("#scene line.vis")) === 10 &&
+    (await text("#nv-front")) === "—",
+  await text("#nv-front")
 );
+await page.locator("#scn-file").setInputFiles(scenarios);
+await settle(900);
+ok("loading the scenarios restores the values", (await text("#nv-front")) === "22.6673", await text("#nv-front"));
 ok(
   "report says nothing was lost",
   (await text("#report")).includes("imported 8 nodes, 10 requirements, 5 data types") &&
@@ -155,7 +174,9 @@ await page.locator('[data-click="tab:types"]').click();
 await settle(400);
 ok(
   "imported data types in the Data types tab",
-  (await count("#ttree .trow")) === 5 && (await text("#trow-0-0 .tcons")) === ">= 0" && (await text("#trow-2 .ttype")).includes("[]"),
+  (await count("#ttree .trow")) === 5 &&
+    (await text("#trow-0-0 .tcons")) === ">= 0" &&
+    (await text("#trow-2 .ttype")).includes("[]"),
   String(await count("#ttree .trow"))
 );
 await page.locator('[data-click="tab:editor"]').click();

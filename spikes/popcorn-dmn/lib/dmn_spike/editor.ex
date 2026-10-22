@@ -64,9 +64,9 @@ defmodule DmnSpike.Editor do
   """
 
   @download_js """
-  ({xml, name}) => {
+  ({xml, name, type}) => {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([xml], {type: 'application/xml'}));
+    a.href = URL.createObjectURL(new Blob([xml], {type: type || 'application/xml'}));
     a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -195,7 +195,7 @@ defmodule DmnSpike.Editor do
     // DMN file import
     // Popcorn 0.4.0-next.9 traps ("memory access out of bounds") when one JS->BEAM message is
     // larger than 64 KiB, so a file is sent in small chunks and reassembled in Elixir.
-    $('#file').addEventListener('change', async (e) => {
+    const sendFile = async (e, kind) => {
       const f = e.target.files[0];
       if (!f) return;
       const text = await f.text(), parts = [], size = 16 * 1024;
@@ -207,9 +207,11 @@ defmodule DmnSpike.Editor do
         i = end;
       }
       if (parts.length === 0) parts.push('');
-      parts.forEach((part, i) => ed({t: 'import_chunk', name: f.name, i, n: parts.length, text: part}));
+      parts.forEach((part, i) => ed({t: 'import_chunk', kind, name: f.name, i, n: parts.length, text: part}));
       e.target.value = '';
-    });
+    };
+    $('#file').addEventListener('change', (e) => sendFile(e, 'dmn'));
+    $('#scn-file').addEventListener('change', (e) => sendFile(e, 'scenarios'));
 
     // expression cells (highlighted textareas with autocomplete)
     const panel = $('#panel');
@@ -310,6 +312,12 @@ defmodule DmnSpike.Editor do
       const b = e.target.closest('[data-click]');
       if (b) {
         const msg = {t: 'click', what: b.dataset.click};
+        // buttons that need a name ask for it here and send it along
+        if (b.dataset.prompt) {
+          const text = prompt(b.dataset.prompt, b.dataset.default ?? '');
+          if (text === null) return;
+          msg.text = text;
+        }
         // the starters of the empty diagram put the node where the middle of the canvas is on screen
         if (msg.what.startsWith('empty-add:')) { const r = $('.stage').getBoundingClientRect(), p = at({clientX: r.left + r.width / 2, clientY: r.top + r.height / 2}); msg.x = p.x; msg.y = p.y; }
         ed(msg);
@@ -600,7 +608,7 @@ defmodule DmnSpike.Editor do
     render_all(%{state | model: Layout.run(state.model)}, true)
   end
 
-  defp event(%{"t" => "import_chunk", "name" => file, "i" => i, "n" => n, "text" => part}, state) do
+  defp event(%{"t" => "import_chunk", "name" => file, "i" => i, "n" => n, "text" => part} = msg, state) do
     {^file, ^n, parts} =
       case state.upload do
         {^file, ^n, _} = u -> u
@@ -611,9 +619,28 @@ defmodule DmnSpike.Editor do
 
     if map_size(parts) == n do
       text = 0..(n - 1) |> Enum.map_join(&Map.fetch!(parts, &1))
-      event(%{"t" => "import", "text" => text, "name" => file}, %{state | upload: nil})
+      kind = if msg["kind"] == "scenarios", do: "import_scenarios", else: "import"
+      event(%{"t" => kind, "text" => text, "name" => file}, %{state | upload: nil})
     else
       %{state | upload: {file, n, parts}}
+    end
+  end
+
+  defp event(%{"t" => "import_scenarios", "text" => text, "name" => file}, state) do
+    with {:ok, data} <- JSON.decode(text),
+         {:ok, model, unmatched} <- Model.import_scenarios(state.model, data) do
+      n = length(model.scenarios)
+
+      miss =
+        if unmatched > 0, do: " (#{unmatched} value#{if unmatched > 1, do: "s"} had no input of that name)", else: ""
+
+      state = push_history(state, nil)
+      state = render_all(%{state | model: model}, true)
+      say(state, "loaded #{n} scenario#{if n > 1, do: "s"} from #{file}#{miss}")
+    else
+      {:error, %{} = _json} -> say(state, "✗ #{file} is not a scenarios file", :error)
+      {:error, msg} when is_binary(msg) -> say(state, "✗ #{file}: #{msg}", :error)
+      _ -> say(state, "✗ #{file} is not a scenarios file", :error)
     end
   end
 
@@ -674,8 +701,39 @@ defmodule DmnSpike.Editor do
     render_all(%{state | model: model, selected: id, sel_edge: nil}, true)
   end
 
+  defp event(%{"t" => "click", "what" => "scn:go:" <> i}, state) do
+    state = push_history(state, nil)
+    render_all(%{state | model: Model.switch_scenario(state.model, String.to_integer(i))}, true)
+  end
+
+  defp event(%{"t" => "click", "what" => "scn:new", "text" => name}, state) do
+    state = push_history(state, nil)
+    render_all(%{state | model: Model.new_scenario(state.model, name)}, true)
+  end
+
+  defp event(%{"t" => "click", "what" => "scn:rename", "text" => name}, state) do
+    state = push_history(state, nil)
+    render_all(%{state | model: Model.rename_scenario(state.model, state.model.scenario, name)}, true)
+  end
+
+  defp event(%{"t" => "click", "what" => "scn:delete"}, state) do
+    state = push_history(state, nil)
+    render_all(%{state | model: Model.delete_scenario(state.model, state.model.scenario)}, true)
+  end
+
+  defp event(%{"t" => "click", "what" => "scn:save"}, state) do
+    file = file_base(state) <> ".scenarios.json"
+    json = state.model |> Model.export_scenarios() |> Map.put("model", state.name) |> JSON.encode!()
+    JS.run!(@download_js, %{xml: json, name: file, type: "application/json"})
+
+    say(
+      state,
+      "saved #{length(state.model.scenarios)} scenario#{if length(state.model.scenarios) > 1, do: "s"} to #{file}"
+    )
+  end
+
   defp event(%{"t" => "click", "what" => "export"}, state) do
-    file = (state.name |> String.replace(~r/[^\w\- ]+/u, "") |> String.trim() |> String.replace(" ", "-")) <> ".dmn"
+    file = file_base(state) <> ".dmn"
     JS.run!(@download_js, %{xml: Dmn.to_xml(state.model, state.name), name: file})
     say(state, "exported #{file}")
   end
@@ -1595,10 +1653,32 @@ defmodule DmnSpike.Editor do
         ["attr", "[data-click='tab:editor']", "aria-pressed", to_string(state.tab == "editor")],
         ["attr", "[data-click='tab:types']", "aria-pressed", to_string(state.tab == "types")],
         ["html", "#report", report_html(state.report)]
-      ] ++ refresh_ops(state, results, us)
+      ] ++ scenario_ops(state) ++ refresh_ops(state, results, us)
     )
 
     if return_state?, do: state, else: :ok
+  end
+
+  defp file_base(state),
+    do: state.name |> String.replace(~r/[^\w\- ]+/u, "") |> String.trim() |> String.replace(" ", "-")
+
+  # the scenario menu: the choices, and what rename and delete act on
+  defp scenario_ops(%{model: m}) do
+    all = Model.scenarios(m)
+    current = Enum.at(all, m.scenario).name
+
+    list =
+      for({s, i} <- Enum.with_index(all)) do
+        ~s|<button type="button" role="menuitemradio" aria-checked="#{i == m.scenario}" data-click="scn:go:#{i}">#{Fmt.esc(s.name)}</button>|
+      end
+      |> Enum.join()
+
+    [
+      ["html", "#scn-list", list],
+      ["html", "#scn-name", Fmt.esc(current)],
+      ["attr", "[data-click='scn:rename']", "data-default", current],
+      ["disabled", "[data-click='scn:delete']", length(all) == 1]
+    ]
   end
 
   defp patch(ops), do: JS.run!(@patch_js, %{ops: ops})

@@ -443,6 +443,66 @@ await page.locator("[data-click=undo]").click();
 await settle(600);
 ok("fixing it clears the list", (await text("#problems-btn")).includes("No problems"));
 
+// test scenarios: named sets of input values, in a menu of their own
+const scenarioMenu = async (item) => {
+  await page.locator("#scn-toggle").click();
+  await item();
+};
+const choose = (i) => scenarioMenu(() => page.locator(`#scn-list [data-click="scn:go:${i}"]`).click());
+const names = () => page.locator("#scn-list button").allTextContents();
+await page.locator("#scn-toggle").click();
+ok(
+  "one scenario to begin with",
+  (await names()).join() === "Scenario 1" && (await page.locator("[data-click='scn:delete']").isDisabled())
+);
+await page.locator("#scn-toggle").click();
+const base = await text("#nv-front");
+await page.locator('#scene g[data-id="app"] .shape').click();
+await settle(300);
+page.once("dialog", (d) => d.accept("High debt"));
+await scenarioMenu(() => page.locator("[data-click='scn:new']").click());
+await settle(600);
+ok(
+  "a new scenario is added, selected and starts as a copy",
+  (await names()).join() === "Scenario 1,High debt" &&
+    (await text("#scn-name")) === "High debt" &&
+    (await text("#nv-front")) === base
+);
+await page.locator('#scene g[data-id="app"] .shape').click();
+await settle(300);
+ok("an input says which scenario its value belongs to", (await text("#panel thead")).includes("High debt"));
+await page.locator('textarea[data-cell="app:0"]').fill("{Income: 1000, Tax: 0, Insurance: 0, Debt: 900}");
+await settle(600);
+const high = await text("#nv-back");
+ok("the value changes the results in this scenario", high !== "31.5562", high);
+await choose(0);
+await settle(600);
+ok(
+  "switching back brings the other values back",
+  (await text("#nv-front")) === base && (await text("#nv-back")) === "31.5562"
+);
+await choose(1);
+await settle(600);
+ok("and forth", (await text("#nv-back")) === high);
+page.once("dialog", (d) => d.accept("Heavy debt"));
+await scenarioMenu(() => page.locator("[data-click='scn:rename']").click());
+await settle(500);
+ok("a scenario can be renamed", (await text("#scn-name")) === "Heavy debt");
+await scenarioMenu(() => page.locator("[data-click='scn:delete']").click());
+await settle(600);
+ok(
+  "deleting the active one goes back to the previous one",
+  (await text("#scn-name")) === "Scenario 1" && (await text("#nv-front")) === base
+);
+await page.locator("[data-click=undo]").click();
+await settle(600);
+ok("and can be undone", (await text("#scn-name")) === "Heavy debt");
+for (let i = 0; i < 8; i++) {
+  if (await page.locator("[data-click=undo]").isDisabled()) break;
+  await page.locator("[data-click=undo]").click();
+  await settle(250);
+}
+
 // type pill
 await page.locator('#scene g[data-id="front"] .shape').click();
 await settle();

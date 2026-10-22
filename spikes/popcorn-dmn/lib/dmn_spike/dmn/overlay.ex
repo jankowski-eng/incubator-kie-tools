@@ -132,7 +132,10 @@ defmodule DmnSpike.Dmn.Overlay do
 
   @doc "What decides whether an element has been edited: its modelled content and its incoming requirements."
   def fingerprint(%Model{} = m, node) do
-    {node.name, node.type, node.type_ref, Model.description(node), node.expr,
+    # the value of an input is test data (a scenario), not part of the file, so it does not count as an edit
+    expr = if node.type == :input, do: nil, else: node.expr
+
+    {node.name, node.type, node.type_ref, Model.description(node), expr,
      for({f, t, k} <- Model.edges_all(m), t == node.id, k != :association, do: {f, k}) |> Enum.sort()}
   end
 
@@ -445,8 +448,22 @@ defmodule DmnSpike.Dmn.Overlay do
         q(Dmn.node_xml(m, node), pre)
 
       %{raw: raw, fp: fp} = entry ->
-        if fingerprint(m, node) == fp, do: from_simple(raw), else: regen_node(m, node, entry, pre)
+        if fingerprint(m, node) == fp and not legacy_value?(raw, pre),
+          do: from_simple(raw),
+          else: regen_node(m, node, entry, pre)
     end
+  end
+
+  # files saved by earlier versions hold an input's test value in an extension element; saving drops it
+  defp legacy_value?({_, _, kids}, pre) do
+    Enum.any?(kids, fn
+      {t, _, ext} ->
+        Dmn.local(t) == "extensionElements" and
+          Enum.any?(ext, &match?({tag, _, _} when tag == pre.spike <> "value", &1))
+
+      _ ->
+        false
+    end)
   end
 
   defp raw_requirements(raw),
@@ -557,7 +574,7 @@ defmodule DmnSpike.Dmn.Overlay do
 
     extension =
       if node.type == :input,
-        do: input_extension(node, named.("extensionElements"), pre),
+        do: input_extension(named.("extensionElements"), pre),
         else: Enum.map(named.("extensionElements"), &from_simple/1)
 
     handled =
@@ -663,22 +680,16 @@ defmodule DmnSpike.Dmn.Overlay do
     Enum.sort_by(unknown ++ merged, fn {:el, t, _, _} -> child_rank(parent, Dmn.local(t)) end)
   end
 
-  # the value of an input data node lives in our own extension element; other extension content is kept
-  defp input_extension(node, existing, pre) do
-    ours = if node.expr.result == "", do: [], else: [q({:el, "spike:value", [], [node.expr.result]}, pre)]
-
+  # an input's test value used to be written into an extension element of ours; it is dropped now (the
+  # value belongs to a scenario) and the other extension content is kept
+  defp input_extension(existing, pre) do
     case existing do
       [] ->
-        if ours == [], do: [], else: [{:el, pre.model <> "extensionElements", [], ours}]
+        []
 
       [{t, a, k} | _] ->
-        kept =
-          for c <- Enum.filter(k, &is_tuple/1),
-              elem(c, 0) != pre.spike <> "value",
-              do: from_simple(c)
-
-        content = kept ++ ours
-        if content == [], do: [], else: [{:el, t, a, content}]
+        kept = for c <- Enum.filter(k, &is_tuple/1), elem(c, 0) != pre.spike <> "value", do: from_simple(c)
+        if kept == [], do: [], else: [{:el, t, a, kept}]
     end
   end
 

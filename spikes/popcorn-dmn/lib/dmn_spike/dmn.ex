@@ -15,8 +15,7 @@ defmodule DmnSpike.Dmn do
     "xmlns:dmndi" => "https://www.omg.org/spec/DMN/20230324/DMNDI/",
     "xmlns:dc" => "http://www.omg.org/spec/DMN/20180521/DC/",
     "xmlns:di" => "http://www.omg.org/spec/DMN/20180521/DI/",
-    "xmlns:kie" => "http://www.drools.org/kie/dmn/1.2",
-    "xmlns:spike" => "urn:popcorn-dmn-spike"
+    "xmlns:kie" => "http://www.drools.org/kie/dmn/1.2"
   }
 
   @doc false
@@ -132,8 +131,9 @@ defmodule DmnSpike.Dmn do
 
     body =
       case n.type do
+        # the test values of an input are scenarios, kept outside the file
         :input ->
-          input_ext(n)
+          []
 
         :bkm ->
           [
@@ -201,9 +201,6 @@ defmodule DmnSpike.Dmn do
   @doc "The id of the diagram element an edge refers to."
   def edge_id(from, to, :association), do: link_id(from, to)
   def edge_id(from, to, _kind), do: req_id(from, to)
-
-  defp input_ext(%{expr: %{result: ""}}), do: []
-  defp input_ext(%{expr: %{result: v}}), do: [el("extensionElements", [], [el("spike:value", [], [v])])]
 
   defp literal(text), do: [el("literalExpression", [], [el("text", [], [text])])]
 

@@ -568,7 +568,12 @@ defmodule DmnSpikeTest do
       xml = Dmn.to_xml(m, "Loan")
       assert xml =~ ~s|<?xml version="1.0" encoding="UTF-8"?>|
       assert {:ok, m2, report} = Dmn.from_xml(xml)
-      assert m2.nodes == m.nodes
+      # the test values of the inputs are scenarios, not part of the file
+      blank = fn nodes ->
+        Map.new(nodes, fn {id, n} -> {id, if(n.type == :input, do: put_in(n.expr.result, ""), else: n)} end)
+      end
+
+      assert blank.(m2.nodes) == blank.(m.nodes)
       assert Enum.sort(m2.edges) == Enum.sort(m.edges)
       assert Enum.map(m2.types, &Map.delete(&1, :origin)) == m.types
       assert report.dropped == %{} and report.name == "Loan" and report.placed == 0
@@ -1191,13 +1196,13 @@ defmodule DmnSpikeTest do
                ~r/<itemDefinition id="_t#{app}" name="tApplicant">\s*<typeRef>string<\/typeRef>\s*<\/itemDefinition>/
     end
 
-    test "children are written in schema order: description before extensionElements, the input's value before its variable" do
+    test "children are written in schema order: description before extensionElements; no test value in an input" do
       m = Model.set_description(Model.sample(), "app", "Who applies")
       m = Model.set_text(m, "app", 0, "{Income: 1}")
       xml = Dmn.to_xml(m)
 
-      assert xml =~
-               ~r/<description>Who applies<\/description>\s*<extensionElements>.*<\/extensionElements>\s*<variable/s
+      assert xml =~ ~r/<inputData id="app".*?<description>Who applies<\/description>\s*<variable/s
+      refute xml =~ "spike:value", "the value belongs to a scenario, not to the file"
 
       xml = """
       <definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="d" id="d1">
@@ -1445,16 +1450,20 @@ defmodule DmnSpikeTest do
       assert out =~ "x + 2"
     end
 
-    test "an input's value is replaced when the spike namespace has another prefix" do
+    test "a test value saved into the file by an earlier version becomes the first scenario and is dropped on save" do
       xml =
-        ~s|<definitions #{@ns} xmlns:p="urn:popcorn-dmn-spike"><inputData id="i" name="In"><variable id="iv" name="In"/><extensionElements><p:value>1</p:value></extensionElements></inputData></definitions>|
+        ~s|<definitions #{@ns} xmlns:p="urn:popcorn-dmn-spike"><inputData id="i" name="In"><variable id="iv" name="In"/><extensionElements><p:value>1</p:value><other xmlns="urn:x"/></extensionElements></inputData></definitions>|
 
       {m, _} = import_xml!(xml)
-      assert m.nodes["i"].expr.result == "1"
-      out = m |> Model.set_text("i", 0, "2") |> Dmn.to_xml()
-      assert length(Regex.scan(~r/<p:value>/, out)) == 1
+      assert m.nodes["i"].expr.result == "1", "the old value is the input's value now"
+      assert [%{name: "Scenario 1"}] = m.scenarios
+
+      # saving without any edit still drops it, whatever the prefix, and keeps the other extension content
+      out = Dmn.to_xml(m)
+      refute out =~ "p:value"
+      assert out =~ ~s|<other xmlns="urn:x"/>|
       {m2, _} = import_xml!(out)
-      assert m2.nodes["i"].expr.result == "2"
+      assert m2.nodes["i"].expr.result == ""
     end
 
     test "an expression constraint on a list constrains the whole list; enumerations still check each item" do
@@ -1706,6 +1715,101 @@ defmodule DmnSpikeTest do
       assert html =~ "&lt;b&gt;x&lt;/b&gt;"
       assert html =~ ~s|data-click="problem-node:front"|
       assert Problems.html(found, 1) =~ "and #{length(found) - 1} more"
+    end
+  end
+
+  describe "test scenarios" do
+    alias DmnSpike.Dmn
+
+    defp app_value(m), do: m.nodes["app"].expr.result
+
+    test "a new scenario starts as a copy, switching keeps each scenario's own values" do
+      m = Model.sample()
+      first = app_value(m)
+      m = Model.new_scenario(m, "High debt")
+      assert Enum.map(Model.scenarios(m), & &1.name) == ["Scenario 1", "High debt"]
+      assert m.scenario == 1 and app_value(m) == first, "copied"
+
+      m = Model.set_text(m, "app", 0, "{Income: 1000, Tax: 0, Insurance: 0, Debt: 900}")
+      high = app_value(m)
+      assert Eval.run(m)["back"].value != Eval.run(Model.sample())["back"].value
+
+      m = Model.switch_scenario(m, 0)
+      assert app_value(m) == first, "the first scenario kept its value"
+      m = Model.switch_scenario(m, 1)
+      assert app_value(m) == high
+      assert Model.switch_scenario(m, 9) == m, "an unknown scenario changes nothing"
+    end
+
+    test "names are unique and never empty" do
+      m = Model.new_scenario(Model.sample(), "Scenario 1")
+      assert Enum.map(Model.scenarios(m), & &1.name) == ["Scenario 1", "Scenario 1 2"]
+      m = Model.new_scenario(m, "   ")
+      assert List.last(Model.scenarios(m)).name == "Scenario 3"
+      m = Model.rename_scenario(m, 0, "Base")
+      assert hd(Model.scenarios(m)).name == "Base"
+
+      assert Model.rename_scenario(m, 0, "Scenario 1 2") |> Model.scenarios() |> hd() |> Map.get(:name) ==
+               "Scenario 1 2 2"
+
+      assert Model.rename_scenario(m, 0, "") |> Model.scenarios() |> hd() |> Map.get(:name) == "Base"
+    end
+
+    test "deleting: the last one stays, the previous one becomes active" do
+      m = Model.sample()
+      assert Model.delete_scenario(m, 0) == m
+      m = m |> Model.new_scenario("B") |> Model.set_text("app", 0, "{Income: 1}") |> Model.new_scenario("C")
+      assert m.scenario == 2
+      m2 = Model.delete_scenario(m, 2)
+      assert m2.scenario == 1 and app_value(m2) == "{Income: 1}"
+      m3 = Model.delete_scenario(m, 0)
+      assert m3.scenario == 1 and Enum.map(Model.scenarios(m3), & &1.name) == ["B", "C"]
+    end
+
+    test "scenarios are saved by input name and loaded back by name" do
+      m = Model.sample() |> Model.new_scenario("Other") |> Model.set_text("app", 0, "{Income: 5}")
+      data = m |> Model.export_scenarios() |> JSON.encode!() |> JSON.decode!()
+      assert %{"format" => "popcorn-dmn-scenarios", "scenarios" => [first, %{"name" => "Other"} = other]} = data
+      assert other["inputs"]["Applicant Data"] == "{Income: 5}"
+      assert Map.keys(first["inputs"]) |> Enum.sort() == ["Applicant Data", "Requested Product"]
+
+      fresh = Model.sample() |> Model.set_text("app", 0, "")
+      assert {:ok, loaded, 0} = Model.import_scenarios(fresh, data)
+      assert Enum.map(Model.scenarios(loaded), & &1.name) == ["Scenario 1", "Other"]
+      assert loaded.scenario == 0 and app_value(loaded) == first["inputs"]["Applicant Data"]
+      assert app_value(Model.switch_scenario(loaded, 1)) == "{Income: 5}"
+    end
+
+    test "values for inputs that do not exist are counted, and a wrong file is refused" do
+      data = %{
+        "scenarios" => [
+          %{"name" => "S", "inputs" => %{"Applicant Data" => "{Income: 1}", "Gone" => "1", "Also gone" => "2"}}
+        ]
+      }
+
+      assert {:ok, m, 2} = Model.import_scenarios(Model.sample(), data)
+      assert app_value(m) == "{Income: 1}"
+      assert {:error, _} = Model.import_scenarios(Model.sample(), %{"scenarios" => []})
+      assert {:error, _} = Model.import_scenarios(Model.sample(), %{"scenarios" => [%{"name" => 1, "inputs" => %{}}]})
+
+      assert {:error, _} =
+               Model.import_scenarios(Model.sample(), %{"scenarios" => [%{"name" => "x", "inputs" => %{"a" => 1}}]})
+
+      assert {:error, _} = Model.import_scenarios(Model.sample(), %{"other" => 1})
+    end
+
+    test "test values are not written into the DMN file, and are not an edit to it" do
+      m = Model.sample() |> Model.set_text("app", 0, "{Income: 1}")
+      refute Dmn.to_xml(m) =~ "{Income: 1}"
+      refute Dmn.to_xml(m) =~ "spike:value"
+      refute Dmn.to_xml(m) =~ "urn:popcorn-dmn-spike", "the file does not even declare our namespace"
+
+      original = File.read!("test/fixtures/Sample.dmn")
+      {:ok, m, _} = Dmn.from_xml(original)
+      id = Enum.find_value(m.nodes, fn {k, n} -> if n.type == :input, do: k end)
+      out = m |> Model.set_text(id, 0, "{Income: 1}") |> Dmn.to_xml()
+      canon = fn xml -> xml |> Saxy.SimpleForm.parse_string() |> elem(1) end
+      assert canon.(out) == canon.(original), "changing a test value leaves the file as it was"
     end
   end
 
