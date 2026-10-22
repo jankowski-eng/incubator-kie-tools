@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<definitions
+  xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/"
+  xmlns:dmndi="https://www.omg.org/spec/DMN/20230324/DMNDI/"
+  xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/"
+  xmlns:di="http://www.omg.org/spec/DMN/20180521/DI/"
+  xmlns:kie="http://www.drools.org/kie/dmn/1.2"
+  id="_loan"
+  name="Loan Pre-Qualification"
+  namespace="https://kie.org/dmn/_loan"
+>
+  <extensionElements />
+  <itemDefinition id="_t1" name="tApplicant" isCollection="false">
+    <itemComponent id="_t1a" name="Income" isCollection="false">
+      <typeRef>number</typeRef>
+      <typeConstraint kie:constraintType="range">
+        <text>&gt;= 0</text>
+      </typeConstraint>
+    </itemComponent>
+    <itemComponent id="_t1b" name="Debt" isCollection="false">
+      <typeRef>number</typeRef>
+    </itemComponent>
+  </itemDefinition>
+  <itemDefinition id="_t2" name="tCategory" isCollection="false">
+    <typeRef>string</typeRef>
+    <typeConstraint kie:constraintType="enumeration">
+      <text>"Low", "Medium", "High"</text>
+    </typeConstraint>
+  </itemDefinition>
+  <itemDefinition id="_t3" name="tScores" isCollection="true">
+    <typeRef>number</typeRef>
+  </itemDefinition>
+
+  <inputData id="_app" name="Applicant Data">
+    <variable id="_app_v" name="Applicant Data" typeRef="tApplicant" />
+  </inputData>
+  <businessKnowledgeModel id="_dti" name="Lender Acceptable DTI">
+    <variable id="_dti_v" name="Lender Acceptable DTI" typeRef="number" />
+    <encapsulatedLogic id="_dti_f">
+      <literalExpression id="_dti_l">
+        <text>36</text>
+      </literalExpression>
+    </encapsulatedLogic>
+  </businessKnowledgeModel>
+  <decision id="_back" name="Back End Ratio">
+    <variable id="_back_v" name="Back End Ratio" typeRef="number" />
+    <informationRequirement id="_r1">
+      <requiredInput href="#_app" />
+    </informationRequirement>
+    <literalExpression id="_back_l">
+      <text>Applicant Data.Debt / Applicant Data.Income * 100</text>
+    </literalExpression>
+  </decision>
+  <decision id="_risk" name="Risk Category">
+    <variable id="_risk_v" name="Risk Category" typeRef="tCategory" />
+    <informationRequirement id="_r2">
+      <requiredDecision href="#_back" />
+    </informationRequirement>
+    <decisionTable id="_dt" hitPolicy="FIRST">
+      <input id="_dt_i">
+        <inputExpression id="_dt_ie" typeRef="number">
+          <text>Back End Ratio</text>
+        </inputExpression>
+      </input>
+      <output id="_dt_o" />
+      <rule id="_dt_r1">
+        <inputEntry id="_e1">
+          <text>&lt; 20</text>
+        </inputEntry>
+        <outputEntry id="_o1">
+          <text>"Low"</text>
+        </outputEntry>
+      </rule>
+      <rule id="_dt_r2">
+        <inputEntry id="_e2">
+          <text>-</text>
+        </inputEntry>
+        <outputEntry id="_o2">
+          <text>"High"</text>
+        </outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <decision id="_loan_d" name="Loan Decision">
+    <variable id="_loan_v" name="Loan Decision" typeRef="string" />
+    <informationRequirement id="_r3">
+      <requiredDecision href="#_risk" />
+    </informationRequirement>
+    <informationRequirement id="_r4">
+      <requiredDecision href="#_back" />
+    </informationRequirement>
+    <knowledgeRequirement id="_k1">
+      <requiredKnowledge href="#_dti" />
+    </knowledgeRequirement>
+    <authorityRequirement id="_a1">
+      <requiredAuthority href="#_bureau" />
+    </authorityRequirement>
+    <context id="_ctx">
+      <contextEntry>
+        <variable id="_c1" name="limit" />
+        <literalExpression id="_c1l">
+          <text>Lender Acceptable DTI + 5</text>
+        </literalExpression>
+      </contextEntry>
+      <contextEntry>
+        <literalExpression id="_c2l">
+          <text>if Back End Ratio &lt;= limit and Risk Category != "High" then "Approve" else "Decline"</text>
+        </literalExpression>
+      </contextEntry>
+    </context>
+  </decision>
+  <decision id="_fee" name="Fee">
+    <variable id="_fee_v" name="Fee" typeRef="number" />
+    <informationRequirement id="_r5">
+      <requiredDecision href="#_back" />
+    </informationRequirement>
+    <invocation id="_inv">
+      <literalExpression>
+        <text>feeFunction</text>
+      </literalExpression>
+    </invocation>
+  </decision>
+  <knowledgeSource id="_bureau" name="Credit Bureau" />
+  <textAnnotation id="_note">
+    <text>Draft rules, review quarterly</text>
+  </textAnnotation>
+  <association id="_assoc">
+    <sourceRef href="#_note" />
+    <targetRef href="#_back" />
+  </association>
+
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram id="_diagram" name="Loan">
+      <dmndi:DMNShape id="_s_app" dmnElementRef="_app">
+        <dc:Bounds x="40" y="320" width="160" height="80" />
+      </dmndi:DMNShape>
+      <dmndi:DMNShape id="_s_back" dmnElementRef="_back">
+        <dc:Bounds x="40" y="180" width="160" height="80" />
+      </dmndi:DMNShape>
+      <dmndi:DMNShape id="_s_risk" dmnElementRef="_risk">
+        <dc:Bounds x="260" y="180" width="160" height="80" />
+      </dmndi:DMNShape>
+      <dmndi:DMNShape id="_s_loan" dmnElementRef="_loan_d">
+        <dc:Bounds x="150" y="40" width="160" height="80" />
+      </dmndi:DMNShape>
+      <dmndi:DMNShape id="_s_dti" dmnElementRef="_dti">
+        <dc:Bounds x="360" y="40" width="160" height="80" />
+      </dmndi:DMNShape>
+      <dmndi:DMNEdge id="_e_r1" dmnElementRef="_r1">
+        <di:waypoint x="120" y="320" />
+        <di:waypoint x="120" y="260" />
+      </dmndi:DMNEdge>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>

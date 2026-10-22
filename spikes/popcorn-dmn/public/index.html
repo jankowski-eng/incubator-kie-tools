@@ -397,6 +397,44 @@
         font: 12px system-ui;
         color: var(--bad);
       }
+      label.file span {
+        display: inline-block;
+        font: inherit;
+        padding: 0.25rem 0.7rem;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        cursor: pointer;
+        background: ButtonFace;
+        color: ButtonText;
+      }
+      .report {
+        font-size: 0.85rem;
+        margin: 0.4rem 0;
+        padding: 0.4rem 0.7rem;
+        border-left: 3px solid var(--accent);
+        background: color-mix(in srgb, var(--accent) 8%, Canvas);
+      }
+      .report:empty {
+        display: none;
+      }
+      .report .bad {
+        color: var(--bad);
+      }
+      .report ul.dropped {
+        margin: 0.25rem 0 0;
+        padding-left: 1.2rem;
+        color: var(--muted);
+      }
+      #xml {
+        margin: 0;
+        padding: 0.6rem;
+        border: 1px solid var(--line);
+        overflow: auto;
+        font:
+          12px/1.45 ui-monospace,
+          monospace;
+        max-height: 75vh;
+      }
     </style>
   </head>
   <body>
@@ -404,11 +442,17 @@
       <nav class="tabs">
         <button data-click="tab:editor" aria-pressed="true">Editor</button>
         <button data-click="tab:types" aria-pressed="false">Data types</button>
+        <button data-click="tab:xml" aria-pressed="false">XML</button>
       </nav>
       <button data-click="undo" disabled>↶ Undo</button><button data-click="redo" disabled>↷ Redo</button>
       <button data-click="layout" title="Arrange nodes in layers">Auto-layout</button>
+      <label class="file" title="Open a .dmn file"
+        ><span>Import…</span><input id="file" type="file" accept=".dmn,.xml" hidden
+      /></label>
+      <button data-click="export" title="Download DMN XML">Export</button>
       <span id="status">Starting Popcorn...</span>
     </header>
+    <div id="report" class="report"></div>
     <section id="view-editor">
       <div class="canvas">
         <div id="palette" title="Drag onto the canvas">
@@ -452,6 +496,7 @@
       <div id="panel"></div>
     </section>
     <section id="view-types" hidden><div id="types"></div></section>
+    <section id="view-xml" hidden><pre id="xml"></pre></section>
     <script type="module">
       import { Popcorn } from "./out/index.mjs";
       const t0 = performance.now();

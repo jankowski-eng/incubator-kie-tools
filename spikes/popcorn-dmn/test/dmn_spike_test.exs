@@ -89,6 +89,7 @@ defmodule DmnSpikeTest do
       assert ["Rate: violates constraint (0..20]", "Term: violates constraint 120, 180, 240, 360"] = Types.validate(m, bad, "tRequested")
       assert Types.validate(m, "x", "number") == ["expected a number"]
       assert Types.validate(m, nil, "tRatio") == []
+      assert Types.validate(m, nil, "number") == []
       assert Types.validate(m, 1, "nope") == ["unknown type nope"]
     end
 
@@ -219,6 +220,74 @@ defmodule DmnSpikeTest do
       assert length(t.inputs) == 2 and Enum.all?(t.rules, &(length(&1.entries) == 2)) and length(t.rules) == 3
       assert Model.set_table_text(m, "risk", ["e", 0, 1], "> 5").nodes["risk"].expr.rules |> hd() |> Map.get(:entries) |> Enum.at(1) == "> 5"
       assert Model.set_expr_kind(m, "risk", :context).nodes["risk"].expr == %{rows: [], result: ""}
+    end
+  end
+
+  describe "DMN XML" do
+    alias DmnSpike.Dmn
+
+    test "export then import reproduces the model exactly" do
+      m = Model.sample()
+      xml = Dmn.to_xml(m, "Loan")
+      assert xml =~ ~s|<?xml version="1.0" encoding="UTF-8"?>|
+      assert {:ok, m2, report} = Dmn.from_xml(xml)
+      assert m2.nodes == m.nodes
+      assert Enum.sort(m2.edges) == Enum.sort(m.edges)
+      assert m2.types == m.types
+      assert report.dropped == %{} and report.name == "Loan" and report.placed == 0
+    end
+
+    test "export is well-formed DMN with the expected structure" do
+      xml = Dmn.to_xml(Model.sample())
+      assert {:ok, {"definitions", _, _}} = Saxy.SimpleForm.parse_string(xml)
+      assert xml =~ ~s|<decision id="risk" name="Risk Category">|
+      assert xml =~ ~s|<decisionTable hitPolicy="FIRST">|
+      assert xml =~ ~s|<typeConstraint kie:constraintType="range">|
+      assert xml =~ ~s|<requiredInput href="#app"/>|
+      assert xml =~ ~s|<requiredKnowledge href="#dti"/>|
+      assert xml =~ ~s|<dc:Bounds x=|
+      assert xml =~ "&lt;= Lender Acceptable PITI"
+    end
+
+    test "imports a KIE-style file and reports what it dropped" do
+      {:ok, m, r} = Dmn.from_xml(File.read!("test/fixtures/kie_sample.dmn"))
+      assert r.name == "Loan Pre-Qualification" and r.nodes == 6 and r.types == 3
+      assert Map.keys(m.nodes) |> Enum.sort() == ["_app", "_back", "_dti", "_fee", "_loan_d", "_risk"]
+      assert %{x: 40, y: 320, w: 160, h: 80} = Map.take(m.nodes["_app"], [:x, :y, :w, :h])
+      assert m.nodes["_app"].type_ref == "tApplicant" and m.nodes["_back"].type == :decision
+      assert {"_app", "_back", :info} in m.edges and {"_back", "_risk", :info} in m.edges and {"_dti", "_loan_d", :knowledge} in m.edges
+      assert length(m.edges) == 6
+      assert r.dropped["knowledgeSource"] == 1 and r.dropped["textAnnotation"] == 1 and r.dropped["association"] == 1
+      assert r.dropped["authorityRequirement"] == 1
+      assert Enum.any?(r.dropped, fn {k, _} -> String.contains?(k, "unsupported expression <invocation>") end)
+      assert r.placed == 1 and m.nodes["_fee"].y > m.nodes["_app"].y, "the Fee decision has no DMNShape, so it is placed below the rest"
+    end
+
+    test "imported types, tables and contexts evaluate" do
+      {:ok, m, _} = Dmn.from_xml(File.read!("test/fixtures/kie_sample.dmn"))
+      t = Types.find(m, "tApplicant")
+      assert [%{name: "Income", constraint: %{kind: :range, text: ">= 0"}}, %{name: "Debt"}] = t.components
+      assert Types.find(m, "tCategory").constraint == %{kind: :enumeration, text: ~s|"Low", "Medium", "High"|}
+      assert Types.find(m, "tScores").collection
+      assert %{kind: :table, hit_policy: "FIRST", rules: [_, _]} = m.nodes["_risk"].expr
+      assert %{rows: [%{name: "limit", text: "Lender Acceptable DTI + 5"}]} = m.nodes["_loan_d"].expr
+      m = Model.set_text(m, "_app", 0, "{Income: 1000, Debt: 100}")
+      r = Eval.run(m)
+      assert Decimal.compare(r["_back"].value, 10) == :eq
+      assert r["_risk"].value == "Low"
+      assert r["_loan_d"].value == "Approve"
+    end
+
+    test "rejects non-DMN and malformed input" do
+      assert {:error, "not a DMN file" <> _} = Dmn.from_xml("<svg/>")
+      assert {:error, "XML parse error" <> _} = Dmn.from_xml("<definitions><decision")
+    end
+
+    test "text is escaped both ways" do
+      m = Model.set_text(Model.sample(), "dti", 0, ~s|"a<b & c>d"|)
+      assert Dmn.to_xml(m) =~ "&quot;" or Dmn.to_xml(m) =~ "a&lt;b &amp; c&gt;d"
+      {:ok, m2, _} = Dmn.from_xml(Dmn.to_xml(m))
+      assert m2.nodes["dti"].expr.result == ~s|"a<b & c>d"|
     end
   end
 end

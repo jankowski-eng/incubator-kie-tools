@@ -6,7 +6,7 @@ defmodule DmnSpike.Editor do
   """
   use GenServer
 
-  alias DmnSpike.{Autocomplete, Eval, Fmt, Layout, Model, Panel, Svg, Types, TypesPanel}
+  alias DmnSpike.{Autocomplete, Dmn, Eval, Fmt, Layout, Model, Panel, Svg, Types, TypesPanel}
   alias Popcorn.JS
 
   @name :editor
@@ -22,6 +22,16 @@ defmodule DmnSpike.Editor do
       else if (k === 'hidden') el.hidden = a;
       else if (k === 'value') { el.value = a; el.setSelectionRange(b, b); el.focus(); }
     }
+  }
+  """
+
+  @download_js """
+  ({xml, name}) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([xml], {type: 'application/xml'}));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
   """
 
@@ -61,6 +71,14 @@ defmodule DmnSpike.Editor do
       e.preventDefault();
       const kind = e.dataTransfer.getData('text/plain'), p = at(e);
       if (kind) ed({t: 'add', kind, x: p.x, y: p.y});
+    });
+
+    // DMN file import
+    $('#file').addEventListener('change', async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      ed({t: 'import', text: await f.text(), name: f.name});
+      e.target.value = '';
     });
 
     // expression cells (highlighted textareas with autocomplete)
@@ -118,7 +136,7 @@ defmodule DmnSpike.Editor do
   def init(_) do
     state = %{
       model: Model.sample(), past: [], future: [], selected: "front", sel_edge: nil,
-      drag: nil, group: nil, connect: nil, tab: "editor"
+      drag: nil, group: nil, connect: nil, tab: "editor", report: nil, name: "Popcorn spike"
     }
 
     {:ok, state, {:continue, :setup}}
@@ -198,6 +216,25 @@ defmodule DmnSpike.Editor do
   defp event(%{"t" => "click", "what" => "layout"}, state) do
     state = push_history(state, nil)
     render_all(%{state | model: Layout.run(state.model)}, true)
+  end
+
+  defp event(%{"t" => "import", "text" => text, "name" => file}, state) do
+    case Dmn.from_xml(text) do
+      {:ok, model, report} ->
+        state = push_history(state, nil)
+        name = report.name || Path.rootname(file)
+        selected = model.nodes |> Map.values() |> Enum.find(&(&1.type == :decision)) |> then(&(&1 && &1.id))
+        render_all(%{state | model: model, selected: selected, sel_edge: nil, report: {:ok, file, report}, name: name}, true)
+
+      {:error, msg} ->
+        render_all(%{state | report: {:error, file, msg}}, true)
+    end
+  end
+
+  defp event(%{"t" => "click", "what" => "export"}, state) do
+    file = (state.name |> String.replace(~r/[^\w\- ]+/u, "") |> String.trim() |> String.replace(" ", "-")) <> ".dmn"
+    JS.run!(@download_js, %{xml: Dmn.to_xml(state.model, state.name), name: file})
+    say(state, "exported #{file}")
   end
 
   defp event(%{"t" => "click", "what" => "tab:" <> tab}, state), do: render_all(%{state | tab: tab}, true)
@@ -463,6 +500,26 @@ defmodule DmnSpike.Editor do
     node_ops ++ shown ++ table ++ [["html", "#status", "evaluated #{n} cells in #{Float.round(us / 1000, 1)} ms"]] ++ history_ops(state)
   end
 
+  defp xml_ops(%{tab: "xml"} = state), do: [["html", "#xml", Fmt.esc(Dmn.to_xml(state.model, state.name))]]
+  defp xml_ops(_state), do: []
+
+  defp report_html(nil), do: ""
+  defp report_html({:error, file, msg}), do: ~s|<div class="bad"><b>#{Fmt.esc(file)}</b>: #{Fmt.esc(msg)}</div>|
+
+  defp report_html({:ok, file, r}) do
+    dropped =
+      for {what, n} <- Enum.sort(r.dropped), do: "<li>#{if n > 1, do: "#{n} × "}#{Fmt.esc(what)}</li>"
+
+    placed = if r.placed > 0, do: ", #{r.placed} placed automatically (no diagram shape)", else: ""
+
+    drop_html =
+      if dropped == [],
+        do: " Nothing was dropped.",
+        else: ~s| Not supported, dropped on import:<ul class="dropped">#{dropped}</ul>|
+
+    ~s|<b>#{Fmt.esc(file)}</b>: imported #{r.nodes} nodes, #{r.edges} requirements, #{r.types} data types#{placed}.#{drop_html}|
+  end
+
   defp say(state, msg) do
     patch([["html", "#status", Fmt.esc(msg)]])
     state
@@ -481,9 +538,12 @@ defmodule DmnSpike.Editor do
         ["html", "#types", TypesPanel.render(state.model)],
         ["hidden", "#view-editor", state.tab != "editor"],
         ["hidden", "#view-types", state.tab != "types"],
+        ["hidden", "#view-xml", state.tab != "xml"],
         ["attr", "[data-click='tab:editor']", "aria-pressed", to_string(state.tab == "editor")],
-        ["attr", "[data-click='tab:types']", "aria-pressed", to_string(state.tab == "types")]
-      ] ++ refresh_ops(state, results, us)
+        ["attr", "[data-click='tab:types']", "aria-pressed", to_string(state.tab == "types")],
+        ["attr", "[data-click='tab:xml']", "aria-pressed", to_string(state.tab == "xml")],
+        ["html", "#report", report_html(state.report)]
+      ] ++ xml_ops(state) ++ refresh_ops(state, results, us)
     )
 
     if return_state?, do: state, else: :ok

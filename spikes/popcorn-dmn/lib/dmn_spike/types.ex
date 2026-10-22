@@ -47,6 +47,7 @@ defmodule DmnSpike.Types do
   # --- validation ---------------------------------------------------------------
 
   @doc "Errors (strings) for `value` against the type named `ref`; [] when it conforms."
+  def validate(_m, nil, _ref), do: []
   def validate(_m, _value, ref) when ref in [nil, "", "<Undefined>", "Any"], do: []
 
   def validate(%Model{} = m, value, ref) do
