@@ -74,10 +74,21 @@ defmodule DmnSpike.Editor do
     });
 
     // DMN file import
+    // Popcorn 0.4.0-next.9 traps ("memory access out of bounds") when one JS->BEAM message is
+    // larger than 64 KiB, so a file is sent in small chunks and reassembled in Elixir.
     $('#file').addEventListener('change', async (e) => {
       const f = e.target.files[0];
       if (!f) return;
-      ed({t: 'import', text: await f.text(), name: f.name});
+      const text = await f.text(), parts = [], size = 16 * 1024;
+      for (let i = 0; i < text.length;) {
+        let end = Math.min(i + size, text.length);
+        const c = text.charCodeAt(end - 1);
+        if (end < text.length && c >= 0xd800 && c <= 0xdbff) end--; // never split a surrogate pair
+        parts.push(text.slice(i, end));
+        i = end;
+      }
+      if (parts.length === 0) parts.push('');
+      parts.forEach((part, i) => ed({t: 'import_chunk', name: f.name, i, n: parts.length, text: part}));
       e.target.value = '';
     });
 
@@ -136,7 +147,7 @@ defmodule DmnSpike.Editor do
   def init(_) do
     state = %{
       model: Model.sample(), past: [], future: [], selected: "front", sel_edge: nil,
-      drag: nil, group: nil, connect: nil, tab: "editor", report: nil, name: "Popcorn spike"
+      drag: nil, group: nil, connect: nil, tab: "editor", report: nil, name: "Popcorn spike", upload: nil
     }
 
     {:ok, state, {:continue, :setup}}
@@ -151,7 +162,18 @@ defmodule DmnSpike.Editor do
   end
 
   @impl true
-  def handle_info({:wasm, msg}, state), do: {:noreply, event(msg, state)}
+  # an exception in one event must not restart the editor (that would silently reset the model)
+  def handle_info({:wasm, msg}, state) do
+    {:noreply, event(msg, state)}
+  rescue
+    e ->
+      say(state, "internal error: " <> inspect(e, limit: 4, printable_limit: 300))
+      {:noreply, state}
+  catch
+    kind, reason ->
+      say(state, "internal error: " <> inspect({kind, reason}, limit: 4, printable_limit: 300))
+      {:noreply, state}
+  end
   def handle_info(_other, state), do: {:noreply, state}
 
   # --- diagram events -------------------------------------------------------------
@@ -216,6 +238,18 @@ defmodule DmnSpike.Editor do
   defp event(%{"t" => "click", "what" => "layout"}, state) do
     state = push_history(state, nil)
     render_all(%{state | model: Layout.run(state.model)}, true)
+  end
+
+  defp event(%{"t" => "import_chunk", "name" => file, "i" => i, "n" => n, "text" => part}, state) do
+    {^file, ^n, parts} = (case state.upload do {^file, ^n, _} = u -> u; _ -> {file, n, %{}} end)
+    parts = Map.put(parts, i, part)
+
+    if map_size(parts) == n do
+      text = 0..(n - 1) |> Enum.map_join(&Map.fetch!(parts, &1))
+      event(%{"t" => "import", "text" => text, "name" => file}, %{state | upload: nil})
+    else
+      %{state | upload: {file, n, parts}}
+    end
   end
 
   defp event(%{"t" => "import", "text" => text, "name" => file}, state) do

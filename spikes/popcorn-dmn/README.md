@@ -26,3 +26,13 @@ mix popcorn.dev     # http://localhost:4000 (sets the COOP/COEP headers)
 Open it in Chrome. The Claude desktop app's in-app browser pane downloads everything but never finishes booting the VM.
 
 Interactions: drag items from the palette onto the canvas; drag a selected node's top handle onto another node to connect (invalid requirements are refused with a reason); click an edge or node and press Delete; Auto-layout is one undo step. Import… opens a `.dmn`/`.xml` file, Export downloads one, the XML tab shows the generated XML. Decision-table nodes have rules, input columns and a hit policy (UNIQUE, FIRST, ANY, COLLECT, RULE ORDER).
+
+## Verification
+
+`mix test` covers the pure logic (31 tests). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, 1,000-node scale and drag latency); see the header of each file for how to run it.
+
+Notes from building this:
+
+- Popcorn `0.4.0-next.9` traps (`memory access out of bounds`) when a single JS→BEAM message is larger than 64 KiB, so file imports are sent in 16K-character chunks. BEAM→JS messages are not affected.
+- `config/config.exs` enables the experimental `treeshake` with `:elixir` preserved. Shaking the Elixir app itself breaks dynamic dispatch (e.g. `Exception.message/1`) and silently kills the editor process.
+- The deps archive ships Popcorn's own two `beam.wasm` runtimes and a `brotli.so` that the browser never uses (about 2 MB brotli).
