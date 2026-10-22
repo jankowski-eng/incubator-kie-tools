@@ -1,0 +1,8 @@
+%{
+  "brotli": {:hex, :brotli, "0.3.3", "904098c11e08a81768a358514c89468a1ef98ce2303bb865431c28fbd534d1da", [:rebar3], [], "hexpm", "3aa6658786bfe97b2aee2710e1bdac6b5125dce0c6299b95842163d7541c7f2f"},
+  "decimal": {:hex, :decimal, "3.2.0", "f1235f05d841a211fda78a08fdb9777f2ff51a71f18455233fae186ff76187c6", [:mix], [], "hexpm", "190bca80580ce61aa69bb0eacadd7677710205c770225c2c2c07e32a5c31b234"},
+  "feel": {:hex, :feel, "0.1.0", "6c2640b1e4050fb46ecf41b41bc951b07dcb130f4653ff5519d7f60fcf6961bd", [:mix], [{:decimal, ">= 3.1.2 and < 4.0.0", [hex: :decimal, repo: "hexpm", optional: false]}, {:tz, "~> 0.28", [hex: :tz, repo: "hexpm", optional: false]}], "hexpm", "2dd3a61cf68fd7f140c76ead632492020b32e1f45bde82c1241990f21713ae18"},
+  "file_system": {:hex, :file_system, "1.1.1", "31864f4685b0148f25bd3fbef2b1228457c0c89024ad67f7a81a3ffbc0bbad3a", [:mix], [], "hexpm", "7a15ff97dfe526aeefb090a7a9d3d03aa907e100e262a0f8f7746b78f8f87a5d"},
+  "popcorn": {:hex, :popcorn, "0.4.0-next.9", "82a1a36728087897f0c08e98719251cfcb62054859be6a1f286502562c75bb5b", [:mix], [{:brotli, "~> 0.3.3", [hex: :brotli, repo: "hexpm", optional: false]}, {:file_system, "~> 1.0", [hex: :file_system, repo: "hexpm", optional: false]}, {:req, "~> 0.5.0 or ~> 0.6.0 or ~> 0.7.0 or 0.8.0-rc.0", [hex: :req, repo: "hexpm", optional: true]}], "hexpm", "40fc288ef9d7c2ccbb9f534628e091ed8eb52c908b721632bf1b713bbe5a6ba8"},
+  "tz": {:hex, :tz, "0.28.4", "f5433914dcf8619d593979ec65bbe878158cad818bc2b53b44d9e4bda509753f", [:mix], [{:castore, "~> 0.1 or ~> 1.0", [hex: :castore, repo: "hexpm", optional: true]}, {:mint, "~> 1.6", [hex: :mint, repo: "hexpm", optional: true]}], "hexpm", "72fe8d526cf30fcc4e07cec4ceb583ba5f2d69c6334c9533419c836a6acd1c56"},
+}

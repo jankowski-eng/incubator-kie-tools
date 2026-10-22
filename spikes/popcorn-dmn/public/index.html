@@ -1,0 +1,263 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Popcorn DMN spike</title>
+    <style>
+      :root {
+        --muted: #6b7280;
+        --line: #8885;
+        --accent: #2563eb;
+        --k: #7c3aed;
+        --n: #b45309;
+        --s: #15803d;
+        --c: #6b7280;
+        --fn: #0e7490;
+        --bad: #dc2626;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --muted: #9ca3af;
+          --accent: #60a5fa;
+          --k: #c4b5fd;
+          --n: #fbbf24;
+          --s: #4ade80;
+          --c: #9ca3af;
+          --fn: #22d3ee;
+          --bad: #f87171;
+        }
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 1rem;
+        max-width: 900px;
+      }
+      header {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+      header span {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin-left: auto;
+      }
+      button {
+        font: inherit;
+        padding: 0.25rem 0.7rem;
+      }
+      svg {
+        width: 100%;
+        border: 1px solid var(--line);
+        touch-action: none;
+        user-select: none;
+      }
+      .node {
+        cursor: grab;
+      }
+      .node .shape {
+        fill: Canvas;
+        stroke: currentColor;
+        stroke-width: 1.2;
+      }
+      .node.sel .shape {
+        stroke: var(--accent);
+        stroke-width: 2.6;
+      }
+      .nv {
+        fill: var(--muted);
+      }
+      #panel {
+        margin-top: 1rem;
+      }
+      .hint {
+        color: var(--muted);
+      }
+      table.boxed {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      table.boxed th,
+      table.boxed td {
+        border: 1px solid var(--line);
+        padding: 0;
+        vertical-align: top;
+      }
+      table.boxed thead th {
+        padding: 0.4rem 0.6rem;
+        text-align: left;
+        background: color-mix(in srgb, var(--accent) 12%, Canvas);
+      }
+      table.boxed small {
+        font-weight: normal;
+        color: var(--muted);
+        margin-left: 0.4rem;
+      }
+      th.lbl {
+        padding: 0.35rem 0.6rem;
+        text-align: left;
+        font:
+          13px ui-monospace,
+          monospace;
+        white-space: nowrap;
+        width: 1%;
+      }
+      td.val {
+        padding: 0.35rem 0.6rem;
+        width: 22%;
+        font:
+          13px ui-monospace,
+          monospace;
+      }
+      td.val .bad,
+      .hl .err {
+        color: var(--bad);
+      }
+      td.val .warn {
+        color: var(--muted);
+        display: block;
+        font: 11px system-ui;
+      }
+      .ed {
+        position: relative;
+        display: grid;
+      }
+      .ed pre.hl,
+      .ed textarea {
+        grid-area: 1 / 1;
+        margin: 0;
+        padding: 0.35rem 0.6rem;
+        font:
+          13px/1.5 ui-monospace,
+          monospace;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        border: 0;
+        box-sizing: border-box;
+      }
+      .ed pre.hl {
+        pointer-events: none;
+      }
+      .ed textarea {
+        background: transparent;
+        color: transparent;
+        caret-color: CanvasText;
+        resize: none;
+        overflow: hidden;
+        outline: none;
+        width: 100%;
+        height: 100%;
+      }
+      .ed:focus-within {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
+      .hl .k {
+        color: var(--k);
+        font-weight: 600;
+      }
+      .hl .n {
+        color: var(--n);
+      }
+      .hl .s {
+        color: var(--s);
+      }
+      .hl .c {
+        color: var(--c);
+        font-style: italic;
+      }
+      .hl .fn {
+        color: var(--fn);
+      }
+      .hl .op {
+        color: var(--muted);
+      }
+      .hl .err {
+        text-decoration: underline wavy var(--bad);
+      }
+      .hl .eof::after {
+        content: "\00a0\00a0";
+      }
+      .ac {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        z-index: 5;
+      }
+      .ac ul {
+        list-style: none;
+        margin: 0;
+        padding: 2px;
+        background: Canvas;
+        border: 1px solid var(--line);
+        box-shadow: 0 4px 12px #0003;
+        font:
+          13px ui-monospace,
+          monospace;
+      }
+      .ac li {
+        padding: 0.2rem 0.6rem;
+        cursor: pointer;
+      }
+      .ac li:first-child {
+        background: color-mix(in srgb, var(--accent) 18%, Canvas);
+      }
+      .ac li:hover {
+        background: color-mix(in srgb, var(--accent) 28%, Canvas);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <button id="undo" disabled>↶ Undo</button><button id="redo" disabled>↷ Redo</button>
+      <span id="status">Starting Popcorn...</span>
+    </header>
+    <svg id="drd" viewBox="0 0 820 370">
+      <defs>
+        <marker
+          id="arrow-fill"
+          viewBox="0 0 10 10"
+          refX="10"
+          refY="5"
+          markerWidth="9"
+          markerHeight="9"
+          orient="auto-start-reverse"
+        >
+          <path d="M0 0L10 5L0 10z" fill="currentColor" />
+        </marker>
+        <marker
+          id="arrow-open"
+          viewBox="0 0 10 10"
+          refX="10"
+          refY="5"
+          markerWidth="9"
+          markerHeight="9"
+          orient="auto-start-reverse"
+        >
+          <path d="M0 0L10 5L0 10" fill="none" stroke="currentColor" stroke-width="1.4" />
+        </marker>
+      </defs>
+      <g id="scene"></g>
+    </svg>
+    <div id="panel"></div>
+    <script type="module">
+      import { Popcorn } from "./out/index.mjs";
+      const t0 = performance.now();
+      try {
+        await Popcorn.init({
+          onStdout: console.log,
+          onStderr: console.error,
+          timeoutsMs: { boot: 120000, appStartup: 120000 },
+        });
+        console.log(`popcorn booted in ${Math.round(performance.now() - t0)} ms`);
+        document.title = "BOOTED";
+      } catch (e) {
+        document.querySelector("#status").textContent = "Popcorn failed: " + (e && (e.message || JSON.stringify(e)));
+        document.title = "FAILED";
+      }
+    </script>
+  </body>
+</html>
