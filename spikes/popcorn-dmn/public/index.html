@@ -262,42 +262,6 @@
         color: var(--muted);
       }
 
-      .pal {
-        padding: 0.5rem 0.6rem;
-        font-size: 12.5px;
-        font-weight: 550;
-        text-align: center;
-        border: 1.4px solid;
-        cursor: grab;
-        user-select: none;
-        transition:
-          transform 0.12s,
-          box-shadow 0.12s;
-      }
-      .pal:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 3px 8px var(--shadow);
-      }
-      .pal:active {
-        cursor: grabbing;
-      }
-      .pal.decision {
-        border-radius: 5px;
-        background: var(--dec-fill);
-        border-color: var(--dec);
-      }
-      .pal.input {
-        border-radius: 999px;
-        background: var(--inp-fill);
-        border-color: var(--inp);
-      }
-      .pal.bkm {
-        background: var(--bkm-fill);
-        border-color: var(--bkm);
-        clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%, 0 10px);
-        border-radius: 0;
-      }
-
       #grid {
         pointer-events: none;
       }
@@ -894,11 +858,6 @@
         border-radius: 10px;
         box-shadow: 0 2px 8px var(--shadow);
       }
-      #palette .pal {
-        width: 42px;
-        height: 28px;
-        padding: 0;
-      }
       .zoomctl #help-btn {
         font-weight: 650;
         color: var(--muted);
@@ -1253,6 +1212,40 @@
           grid-template-columns: 1fr;
         }
       }
+
+      /* palette: the same shapes as the diagram */
+      .pal {
+        width: 42px;
+        height: 28px;
+        cursor: grab;
+        user-select: none;
+        transition: transform 0.12s;
+      }
+      .pal:hover {
+        transform: translateY(-1px);
+      }
+      .pal:active {
+        cursor: grabbing;
+      }
+      .pal svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        stroke-width: 1.6;
+      }
+      .pal.decision svg > * {
+        fill: var(--dec-fill);
+        stroke: var(--dec);
+      }
+      .pal.input svg > * {
+        fill: var(--inp-fill);
+        stroke: var(--inp);
+      }
+      .pal.bkm svg > * {
+        fill: var(--bkm-fill);
+        stroke: var(--bkm);
+      }
     </style>
   </head>
   <body>
@@ -1287,26 +1280,34 @@
         <div class="stage">
           <div id="palette" role="toolbar" aria-label="Add elements">
             <div
-              class="pal decision"
-              draggable="true"
-              data-kind="decision"
-              title="Decision: drag onto the canvas"
-              aria-label="Decision"
-            ></div>
-            <div
               class="pal input"
               draggable="true"
               data-kind="input"
               title="Input data: drag onto the canvas"
               aria-label="Input data"
-            ></div>
+            >
+              <svg viewBox="0 0 42 28" aria-hidden="true"><rect x="1" y="1" width="40" height="26" rx="13" /></svg>
+            </div>
+            <div
+              class="pal decision"
+              draggable="true"
+              data-kind="decision"
+              title="Decision: drag onto the canvas"
+              aria-label="Decision"
+            >
+              <svg viewBox="0 0 42 28" aria-hidden="true"><rect x="1" y="1" width="40" height="26" rx="3" /></svg>
+            </div>
             <div
               class="pal bkm"
               draggable="true"
               data-kind="bkm"
               title="Business knowledge: drag onto the canvas"
               aria-label="Business knowledge"
-            ></div>
+            >
+              <svg viewBox="0 0 42 28" aria-hidden="true">
+                <polygon points="8,1 41,1 41,20 34,27 1,27 1,8" stroke-linejoin="round" />
+              </svg>
+            </div>
           </div>
           <div class="zoomctl">
             <button data-click="zoom-in" title="Zoom in">+</button

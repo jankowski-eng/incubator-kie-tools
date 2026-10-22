@@ -107,7 +107,7 @@ defmodule DmnSpike.Svg do
   @icons %{
     "decision" => ~s|<rect x="-8" y="-6" width="16" height="12" rx="2"/>|,
     "input" => ~s|<rect x="-9" y="-6" width="18" height="12" rx="6"/>|,
-    "bkm" => ~s|<path d="M-9 -2L-5 -6H9V6H-9Z" stroke-linejoin="round"/>|
+    "bkm" => ~s|<path d="M-5 -6H9V2L5 6H-9V-2Z" stroke-linejoin="round"/>|
   }
   @labels %{"decision" => "decision", "input" => "input data", "bkm" => "business knowledge"}
 
@@ -154,10 +154,10 @@ defmodule DmnSpike.Svg do
   defp shape(%{type: :input} = n),
     do: ~s|<rect class="shape input" width="#{n.w}" height="#{n.h}" rx="#{div(n.h, 2)}"/>|
 
-  # business knowledge: a rectangle with both top corners cut
+  # business knowledge (DMN notation): a rectangle with the top-left and bottom-right corners cut
   defp shape(%{type: :bkm} = n) do
     c = 14
-    pts = [{c, 0}, {n.w - c, 0}, {n.w, c}, {n.w, n.h}, {0, n.h}, {0, c}]
+    pts = [{c, 0}, {n.w, 0}, {n.w, n.h - c}, {n.w - c, n.h}, {0, n.h}, {0, c}]
 
     ~s|<polygon class="shape bkm" points="#{Enum.map_join(pts, " ", fn {x, y} -> "#{x},#{y}" end)}" stroke-linejoin="round"/>|
   end

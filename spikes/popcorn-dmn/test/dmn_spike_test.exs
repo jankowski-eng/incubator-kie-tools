@@ -156,7 +156,7 @@ defmodule DmnSpikeTest do
 
     test "add_required creates a node the target requires, without overlapping another" do
       m = Model.sample()
-      assert Model.required_kinds(:decision) == ["bkm", "decision", "input"]
+      assert Model.required_kinds(:decision) == ["input", "decision", "bkm"]
       assert Model.required_kinds(:bkm) == ["bkm"]
       assert Model.required_kinds(:input) == []
 

@@ -274,7 +274,8 @@ defmodule DmnSpike.Model do
   end
 
   @doc "Kinds that can be created as a requirement of a node of `type` (empty when it can require nothing)."
-  def required_kinds(type), do: for({kind, {t, _}} <- Enum.sort(@kinds), valid_pair?(t, type), do: kind)
+  def required_kinds(type),
+    do: for(kind <- ["input", "decision", "bkm"], valid_pair?(elem(@kinds[kind], 0), type), do: kind)
 
   @doc """
   Adds a node of `kind` that `to` requires and connects it. Decisions and inputs go below `to`,
