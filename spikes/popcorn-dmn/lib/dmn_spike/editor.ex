@@ -37,6 +37,9 @@ defmodule DmnSpike.Editor do
 
   @events_js """
   (_, {send}) => {
+    // the editor process can restart; the listeners from the first start keep working, so never add a second set
+    if (window.__dmnEditorBound) return;
+    window.__dmnEditorBound = true;
     const $ = (s) => document.querySelector(s);
     const ed = (m) => send('editor', m);
     const svg = $('#drd'), pt = svg.createSVGPoint();
@@ -145,7 +148,11 @@ defmodule DmnSpike.Editor do
       const k = e.key.toLowerCase();
       if ((e.metaKey || e.ctrlKey) && k === 'z') { e.preventDefault(); ed({t: e.shiftKey ? 'redo' : 'undo'}); }
       else if ((e.metaKey || e.ctrlKey) && k === 'y') { e.preventDefault(); ed({t: 'redo'}); }
-      else if (k === 'delete' || k === 'backspace') { e.preventDefault(); ed({t: 'delete'}); }
+      else if ((k === 'delete' || k === 'backspace') && (e.target === document.body || e.target.closest('#drd'))) {
+        // only from the canvas: with focus on a toolbar button Backspace must not delete the selection
+        e.preventDefault();
+        ed({t: 'delete'});
+      }
     });
   }
   """
@@ -502,7 +509,7 @@ defmodule DmnSpike.Editor do
 
   defp select(state, target) do
     results = Eval.run(state.model)
-    unselect = deselect_ops(state)
+    unselect = deselect_ops(state, results)
 
     {state, ops} =
       case target do
@@ -521,9 +528,7 @@ defmodule DmnSpike.Editor do
     state
   end
 
-  defp deselect_ops(state) do
-    results = Eval.run(state.model)
-
+  defp deselect_ops(state, results) do
     node =
       if state.selected && state.model.nodes[state.selected],
         do: [["attr", ~s|[data-id="#{state.selected}"]|, "class", Svg.node_class(false, results[state.selected].errors != [])]],

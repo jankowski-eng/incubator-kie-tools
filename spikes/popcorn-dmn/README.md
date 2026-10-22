@@ -30,7 +30,7 @@ Interactions: drag items from the palette onto the canvas; drag a selected node'
 
 ## Verification
 
-`mix test` covers the pure logic (44 tests, including the real KIE sample). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
+`mix test` covers the pure logic (46 tests, including the real KIE sample). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
 
 Notes from building this:
 

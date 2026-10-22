@@ -196,7 +196,9 @@ defmodule DmnSpike.Model do
   @doc "Adds a node of `kind` centred on `{x, y}`; returns `{model, id}`."
   def add_node(%__MODULE__{} = m, kind, x, y) do
     {type, label} = Map.fetch!(@kinds, kind)
-    id = "n#{m.next}"
+    # `next` is only a hint: an imported file may already use n<next>, n<next+1>, ...
+    n = Enum.find(m.next..(m.next + map_size(m.nodes)), &(not Map.has_key?(m.nodes, "n#{&1}")))
+    id = "n#{n}"
     names = MapSet.new(Map.values(m.nodes), & &1.name)
     base = "New #{label}"
     name = Enum.find([base | Enum.map(2..99, &"#{base} #{&1}")], &(not MapSet.member?(names, &1)))
@@ -206,7 +208,7 @@ defmodule DmnSpike.Model do
       expr: %{rows: [], result: ""}, type_ref: nil
     }
 
-    {%{m | nodes: Map.put(m.nodes, id, node), next: m.next + 1}, id}
+    {%{m | nodes: Map.put(m.nodes, id, node), next: n + 1}, id}
   end
 
   def delete_node(%__MODULE__{} = m, id) do

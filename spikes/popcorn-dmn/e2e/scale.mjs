@@ -5,8 +5,11 @@ import fs from "node:fs";
 const require = createRequire(`${process.env.PLAYWRIGHT_CORE}/`);
 const OUT = process.env.OUT ?? ".";
 const { chromium } = require("playwright-core");
-const N_IN = Number(process.env.N_IN || 40),
-  N_DEC = Number(process.env.N_DEC || 160);
+// 400 nodes is about 130 KB: over the 64 KiB limit of one JS->VM message, so import must chunk
+const N_IN = Number(process.env.N_IN || 100),
+  N_DEC = Number(process.env.N_DEC || 300);
+// multi-byte text (accents, a surrogate pair) in every element, so chunk boundaries fall inside such characters
+const NOTE = "<description>naïve café 😀 日本語</description>";
 // ---- generate a big DMN (no DMNDI, so import must lay everything out)
 let seed = 7;
 const rnd = (n) => {
@@ -17,7 +20,7 @@ const names = [];
 let body = "";
 for (let i = 0; i < N_IN; i++) {
   names.push(`N${i}`);
-  body += `<inputData id="n${i}" name="N${i}"><variable name="N${i}" typeRef="number"/><extensionElements><spike:value>${i + 1}</spike:value></extensionElements></inputData>\n`;
+  body += `<inputData id="n${i}" name="N${i}">${NOTE}<variable name="N${i}" typeRef="number"/><extensionElements><spike:value>${i + 1}</spike:value></extensionElements></inputData>\n`;
 }
 for (let i = 0; i < N_DEC; i++) {
   const id = N_IN + i,
@@ -25,7 +28,7 @@ for (let i = 0; i < N_DEC; i++) {
     b = rnd(id);
   const reqs = [...new Set([a, b])];
   body +=
-    `<decision id="n${id}" name="N${id}"><variable name="N${id}" typeRef="number"/>` +
+    `<decision id="n${id}" name="N${id}">${NOTE}<variable name="N${id}" typeRef="number"/>` +
     reqs
       .map(
         (r) =>

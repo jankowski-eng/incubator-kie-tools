@@ -195,6 +195,20 @@ ok(
   (await text("#report")).slice(0, 100)
 );
 
+// an element id that tries to break out of an HTML attribute is refused at import
+const evil = `<definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="x"><inputData id="a&quot; onmouseover=&quot;window.__pwned=1&quot; x=&quot;" name="N"><variable name="N"/></inputData></definitions>`;
+await page.locator("#file").setInputFiles({ name: "evil.dmn", mimeType: "text/xml", buffer: Buffer.from(evil) });
+await settle(600);
+ok(
+  "an id with quotes is refused",
+  (await text("#report")).includes("invalid element id"),
+  (await text("#report")).slice(0, 120)
+);
+ok(
+  "nothing was injected into the page",
+  (await count("[onmouseover]")) === 0 && (await count("#scene g[data-id]")) === 8
+);
+
 console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);
 console.log(logs.filter((l) => !l.startsWith("[log] popcorn")).join("\n"));
 await browser.close();

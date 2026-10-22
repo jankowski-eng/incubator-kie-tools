@@ -152,15 +152,26 @@ defmodule DmnSpike.Dmn do
   def from_xml(xml) when is_binary(xml) do
     case Saxy.SimpleForm.parse_string(xml) do
       {:ok, {root, attrs, children}} ->
-        if local(root) == "definitions" do
+        with true <- local(root) == "definitions" || {:error, "not a DMN file: root element is <#{local(root)}>"},
+             :ok <- check_ids(children) do
           {model, report} = build(attrs, children)
           {:ok, model, report}
-        else
-          {:error, "not a DMN file: root element is <#{local(root)}>"}
         end
 
       {:error, e} ->
         {:error, "XML parse error: " <> Exception.message(e)}
+    end
+  end
+
+  # Element ids end up in HTML attributes and CSS selectors. DMN ids are XML names, so anything
+  # else (quotes, angle brackets, spaces) is refused here, at the only place they enter.
+  defp check_ids(children) do
+    bad =
+      for {tag, a, _} <- children, @elements[local(tag)], id = attr(a, "id"), not Regex.match?(~r/\A[\w.\-]+\z/u, id), do: id
+
+    case bad do
+      [] -> :ok
+      [id | _] -> {:error, "invalid element id #{inspect(String.slice(id, 0, 40))}: ids may only contain letters, digits, _, . and -"}
     end
   end
 

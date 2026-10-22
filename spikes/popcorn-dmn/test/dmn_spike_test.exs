@@ -413,4 +413,28 @@ defmodule DmnSpikeTest do
       assert r2.dropped == %{} and r2.converted == %{}
     end
   end
+
+  describe "review fixes" do
+    alias DmnSpike.Dmn
+
+    defp dmn(body), do: ~s|<definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="x">#{body}</definitions>|
+
+    test "element ids that are not plain XML names are refused at import" do
+      for bad <- [~s|a&quot; onmouseover=&quot;alert(1)&quot; x=&quot;|, "a b", "a&lt;b", "a&#39;b", "a/b"] do
+        assert {:error, "invalid element id" <> _} = Dmn.from_xml(dmn(~s|<decision id="#{bad}" name="N"><variable name="N"/></decision>|)), bad
+      end
+
+      for good <- ["n1", "_1CF5CEFA-AF97-46F9-9CD5-9A8AEBB20B4E", "dec.1", "é"] do
+        assert {:ok, _, _} = Dmn.from_xml(dmn(~s|<decision id="#{good}" name="N"><variable name="N"/></decision>|)), good
+      end
+    end
+
+    test "added nodes never reuse the id of an imported node" do
+      {:ok, m, _} = Dmn.from_xml(dmn(~s|<inputData id="n2" name="Imported"><variable name="Imported"/></inputData><inputData id="n3" name="Also"><variable name="Also"/></inputData>|))
+      {m, ids} = Enum.reduce(1..4, {m, []}, fn _, {m, ids} -> {m, id} = Model.add_node(m, "decision", 0, 0); {m, [id | ids]} end)
+      assert length(Enum.uniq(ids)) == 4
+      assert map_size(m.nodes) == 6
+      assert m.nodes["n2"].name == "Imported" and m.nodes["n3"].name == "Also"
+    end
+  end
 end

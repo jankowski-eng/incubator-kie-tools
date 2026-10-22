@@ -235,6 +235,20 @@ ok(
     Math.abs(afterUndo.y - (byId.loan.y + byId.loan.h / 2)) > 1
 );
 
+// Delete/Backspace only act from the canvas: with focus on a toolbar button Backspace must not delete the selection
+const nodesBefore = await count("#scene g[data-id]");
+await page.locator('[data-click="layout"]').click();
+await settle(400);
+await page.keyboard.press("Backspace");
+await settle(400);
+ok("Backspace with focus on a toolbar button deletes nothing", (await count("#scene g[data-id]")) === nodesBefore);
+await page.locator('#scene [data-id="loan"]').click({ force: true });
+await settle(300);
+await page.keyboard.press("Backspace");
+await settle(400);
+ok("Backspace on the canvas still deletes the selected node", (await count("#scene g[data-id]")) === nodesBefore - 1);
+ok("editor listeners are installed once", await page.evaluate(() => window.__dmnEditorBound === true));
+
 console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);
 console.log(logs.filter((l) => !l.startsWith("[log] popcorn")).join("\n"));
 await browser.close();
