@@ -648,6 +648,28 @@ ok("the summary can be dismissed", (await page.locator("#report").innerHTML()) =
 await page.screenshot({ path: `${OUT}/ws1.png` });
 await page.evaluate(() => document.activeElement?.blur());
 
+// a problem with a data type opens the Data types view on that type (this replaces the model: keep it last)
+const badType = `<definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="bad" id="d"><itemDefinition id="t1" name="tOk"><typeRef>number</typeRef></itemDefinition><itemDefinition id="t2" name="tBad"><typeRef>number</typeRef><allowedValues><text>((</text></allowedValues></itemDefinition></definitions>`;
+await page.locator("#file").setInputFiles({ name: "bad.dmn", mimeType: "text/xml", buffer: Buffer.from(badType) });
+await settle(900);
+ok(
+  "an invalid constraint is a problem",
+  (await text("#problems-btn")).includes("1 problem"),
+  await text("#problems-btn")
+);
+await page.locator("#problems-btn").click();
+await page.locator("#problems-list .problem").first().click();
+await settle(600);
+ok(
+  "clicking it opens the Data types view on that type",
+  (await page.locator("#view-types").isVisible()) &&
+    (await page.locator("#trow-1.sel, #trow-1[aria-selected=true]").count()) === 1,
+  await page
+    .locator("#ttree .trow.sel")
+    .first()
+    .textContent()
+    .catch(() => "no selected row")
+);
 console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);
 // a runner (CI, a shell script) reads the result from the exit status
 process.exitCode = fails === 0 ? 0 : 1;

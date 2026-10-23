@@ -193,6 +193,49 @@ defmodule DmnSpike.Dmn.Overlay do
     {header, {:el, doc.root_tag, root_attrs, out}}
   end
 
+  # --- type references the file keeps --------------------------------------------------
+
+  @doc """
+  `{node name, type name}` for type references that are written back from the original file and not from
+  the model: everything in a node that is saved as it was read, and the formal parameters and read-only
+  expressions of a node that was edited. Deleted nodes have no say. Used to keep a type that only such a
+  reference uses from being deleted.
+  """
+  def retained_type_refs(%Model{doc: nil}), do: []
+
+  def retained_type_refs(%Model{doc: doc} = m) do
+    for {id, %{raw: raw, fp: fp}} <- doc.nodes,
+        node = m.nodes[id],
+        ref <- if(fingerprint(m, node) == fp, do: type_refs(raw), else: kept_refs(raw, node)),
+        do: {node.name, ref}
+  end
+
+  defp kept_refs({_, _, kids}, node) do
+    raw = for k <- kids, is_tuple(k), do: k
+    params = for r <- raw, p <- descendants(r, "formalParameter"), ref <- type_refs(p), do: ref
+
+    expression =
+      if match?(%{kind: :raw}, node.expr),
+        do: for(r <- raw, Dmn.local(elem(r, 0)) in @expr_tags, ref <- type_refs(r), do: ref),
+        else: []
+
+    params ++ expression
+  end
+
+  defp descendants({tag, _, kids} = e, name) do
+    own = if Dmn.local(tag) == name, do: [e], else: []
+    own ++ Enum.flat_map(kids, fn k -> if is_tuple(k), do: descendants(k, name), else: [] end)
+  end
+
+  defp type_refs({tag, attrs, kids}) do
+    own = for {k, v} <- attrs, Dmn.local(k) == "typeRef", v != "", do: v
+
+    text =
+      if Dmn.local(tag) == "typeRef", do: [kids |> Enum.filter(&is_binary/1) |> Enum.join() |> String.trim()], else: []
+
+    own ++ text ++ Enum.flat_map(kids, fn k -> if is_tuple(k), do: type_refs(k), else: [] end)
+  end
+
   # --- renamed types -----------------------------------------------------------------
 
   # imported types remember the name they had in the file (`origin`); a rename must also reach the

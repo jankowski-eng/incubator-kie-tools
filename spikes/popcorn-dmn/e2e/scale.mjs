@@ -90,21 +90,40 @@ console.log(
 );
 
 // edit latency: change an input value; everything downstream re-evaluates
-await page.locator(`#scene [data-id="n0"] .shape`).click({ force: true });
-await page.waitForFunction(() => document.querySelector('textarea[data-cell="n0:0"]'), null, { timeout: 60000 });
+// the inspector floats over the canvas: close it and fit the view so that the input to edit is not under anything
+await page.keyboard.press("Escape");
+await page.locator('[data-click="fit"]').click();
+await page.waitForTimeout(500);
+// an input node whose centre is not covered by a neighbour's hover pad (a forced click would hit that instead)
+const target = await page.evaluate(() => {
+  for (const shape of document.querySelectorAll("#scene g[data-id] .shape.input")) {
+    const r = shape.getBoundingClientRect();
+    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    const id = shape.closest("[data-id]").dataset.id;
+    if (top?.closest("[data-id]")?.dataset.id === id) return id;
+  }
+  return null;
+});
+if (!target) throw new Error("no input node is reachable at the fitted zoom");
+await page.locator(`#scene [data-id="${target}"] .shape`).click({ force: true });
+await page.waitForFunction((id) => document.querySelector(`textarea[data-cell="${id}:0"]`), target, { timeout: 60000 });
+// the status line still shows the evaluation of an earlier operation, so wait for the result of this one:
+// the badge of the edited node changes to the new value only after the edit has been evaluated
 t = Date.now();
-await page.locator('textarea[data-cell="n0:0"]').fill("100");
-await page.waitForFunction(() => /evaluated \d+ cells/.test(document.querySelector("#status").textContent));
-await page.waitForTimeout(200);
-console.log(
-  `edit a cell (re-evaluate all): ${Date.now() - t - 200} ms | ${await page.locator("#status").textContent()}`
-);
+await page.locator(`textarea[data-cell="${target}:0"]`).fill("100");
+await page.waitForFunction((id) => document.querySelector(`#nv-${id}`)?.textContent === "100", target, {
+  timeout: 120000,
+});
+console.log(`edit a cell (re-evaluate all): ${Date.now() - t} ms | ${await page.locator("#status").textContent()}`);
 
 // layout latency
+// layout re-renders the whole scene, so mark a node and wait until that very element has been replaced
+await page.evaluate(() => (document.querySelector("#scene g[data-id]").dataset.marker = "1"));
 t = Date.now();
 await page.locator('[data-click="layout"]').click();
-await page.waitForTimeout(100);
-await page.waitForFunction(() => /evaluated/.test(document.querySelector("#status").textContent));
-console.log(`auto-layout click -> settled: ~${Date.now() - t} ms`);
+await page.waitForFunction(() => !document.querySelector("#scene g[data-id]")?.dataset.marker, null, {
+  timeout: 120000,
+});
+console.log(`auto-layout click -> scene replaced: ${Date.now() - t} ms`);
 console.log(logs.filter((l) => !l.startsWith("popcorn")).join("\n"));
 await browser.close();

@@ -560,8 +560,11 @@ defmodule DmnSpike.Editor do
       else: state
   end
 
-  defp event(%{"t" => "click", "what" => "problem-type:" <> i}, state),
-    do: render_all(%{state | tab: "types", type_sel: String.to_integer(i)}, true)
+  defp event(%{"t" => "click", "what" => "problem-type:" <> i}, state) do
+    state = render_all(%{state | tab: "types", tsel: i}, true)
+    patch([["scrollto", "#trow-#{i}"]])
+    state
+  end
 
   defp event(%{"t" => "click", "what" => "dock:" <> dock}, state) when dock in ["expr", "props"] do
     state = %{state | dock: dock}

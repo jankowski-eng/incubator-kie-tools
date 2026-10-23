@@ -1521,7 +1521,7 @@ defmodule DmnSpikeTest do
     <decision id="a" name="A"><variable id="v" name="A"/>
       <decisionTable id="dt" hitPolicy="FIRST">
         <input id="i1"><inputExpression id="ie" typeRef="number"><text>1</text></inputExpression><inputValues id="iv"><text>1,2</text></inputValues></input>
-        <output id="o1" name="r"><outputValues id="ov"><text>"x","y"</text></outputValues><defaultOutputEntry id="doe"><text>"x"</text></defaultOutputEntry></output>
+        <output id="o1" name="r"><outputValues id="ov"><text>"x","y"</text></outputValues></output>
         <rule id="r1"><inputEntry id="e1"><text>1</text></inputEntry><outputEntry id="oe1"><text>"x"</text></outputEntry></rule>
         <rule id="r2"><inputEntry id="e2"><text>2</text></inputEntry><outputEntry id="oe2"><text>"y"</text></outputEntry></rule>
       </decisionTable>
@@ -1545,7 +1545,6 @@ defmodule DmnSpikeTest do
       m = import3!(doc3(@table3))
       out = m |> Model.set_table_text("a", ["e", 0, 0], "2") |> Dmn.to_xml()
       assert out =~ ~s|<outputValues id="ov">|
-      assert out =~ ~s|<defaultOutputEntry id="doe">|
       assert out =~ ~s|<inputValues id="iv">|
 
       assert out =~ ~r/<inputExpression id="ie" typeRef="number">.*<\/inputExpression>\s*<inputValues/s,
@@ -1905,6 +1904,103 @@ defmodule DmnSpikeTest do
       assert for({id, n} <- m.nodes, n.type_ref == "tRatio", do: id) |> Enum.sort() == Enum.sort(users)
       m = Types.rename_top(m, i, "tShare")
       assert for({id, n} <- m.nodes, n.type_ref == "tShare", do: id) |> Enum.sort() == Enum.sort(users)
+    end
+  end
+
+  describe "review round five (retained references, built-in names, tables)" do
+    alias DmnSpike.Dmn
+
+    @ns5 ~s|xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="d" id="d1"|
+    defp import5!(body),
+      do: Dmn.from_xml(~s|<definitions #{@ns5}>#{body}</definitions>|) |> then(fn {:ok, m, r} -> {m, r} end)
+
+    @bkm5 """
+    <itemDefinition id="t1" name="tAge"><typeRef>number</typeRef></itemDefinition>
+    <businessKnowledgeModel id="k" name="K"><variable id="kv" name="K"/>
+      <encapsulatedLogic id="el"><formalParameter id="p" name="age" typeRef="tAge"/>
+        <literalExpression><text>age</text></literalExpression></encapsulatedLogic>
+    </businessKnowledgeModel>
+    """
+
+    test "a type only a kept formal parameter uses counts as used, until that node is deleted" do
+      {m, _} = import5!(@bkm5)
+      assert Types.usages(m, "tAge").nodes == ["K (kept from the file)"]
+
+      # still there after the node is edited: the parameter is written back as it was
+      assert Types.usages(Model.rename(m, "k", "K2"), "tAge").nodes == ["K2 (kept from the file)"]
+      # a deleted node holds nothing
+      assert Types.usages(Model.delete_node(m, "k"), "tAge").nodes == []
+    end
+
+    test "references in a read-only expression and in an untouched node count" do
+      {m, _} =
+        import5!("""
+        <itemDefinition id="t1" name="tAge"><typeRef>number</typeRef></itemDefinition>
+        <decision id="a" name="A"><variable id="v" name="A"/>
+          <relation id="r"><column id="c" name="x" typeRef="tAge"/></relation>
+        </decision>
+        """)
+
+      assert %{kind: :raw} = m.nodes["a"].expr
+      assert Types.usages(m, "tAge").nodes == ["A (kept from the file)"]
+    end
+
+    test "a node that already shows its use is not listed twice" do
+      m = Model.sample()
+      assert Types.usages(m, "tApplicant").nodes == ["Applicant Data"]
+    end
+
+    test "a built-in name is a draft too: references do not follow it, and it is reported" do
+      m = Model.sample()
+      i = Enum.find_index(m.types, &(&1.name == "tRatio"))
+      users = for {id, n} <- m.nodes, n.type_ref == "tRatio", do: id
+      builtin_users = for {id, n} <- m.nodes, n.type_ref == "number", do: id
+
+      m = Types.rename_top(m, i, "number")
+      assert for({id, n} <- m.nodes, n.type_ref == "tRatio", do: id) == users
+      assert for({id, n} <- m.nodes, n.type_ref == "number", do: id) == builtin_users
+      assert Types.name_error(m.types, [i]) =~ "built-in"
+      # the type still resolves by its old name, so its constraint still applies
+      assert Types.validate(m, Decimal.new(500), "tRatio") != []
+
+      m = Types.rename_top(m, i, "numberList")
+      assert for({id, n} <- m.nodes, n.type_ref == "numberList", do: id) == users
+      assert for({id, n} <- m.nodes, n.type_ref == "number", do: id) == builtin_users, "built-in references untouched"
+      assert Enum.at(m.types, i).ref == "number", "its own base is still the built-in"
+    end
+
+    test "a table with a default output entry is kept read-only instead of returning null when nothing matches" do
+      {m, r} =
+        import5!("""
+        <decision id="a" name="A"><variable id="v" name="A"/>
+          <decisionTable hitPolicy="FIRST"><input id="i"><inputExpression><text>1</text></inputExpression></input>
+            <output id="o"><defaultOutputEntry><text>"x"</text></defaultOutputEntry></output>
+            <rule><inputEntry><text>2</text></inputEntry><outputEntry><text>"y"</text></outputEntry></rule>
+          </decisionTable>
+        </decision>
+        """)
+
+      assert %{kind: :raw, tag: "decisionTable with a default output entry"} = m.nodes["a"].expr
+      assert map_size(r.kept) > 0
+      assert Dmn.to_xml(m) =~ "<defaultOutputEntry>"
+    end
+
+    test "ANY accepts numerically equal outputs written differently, also inside lists and contexts" do
+      {m, id} = Model.add_node(Model.sample(), "decision", 0, 0)
+      m = Model.set_expr_kind(m, id, :table) |> Model.set_hit_policy(id, "ANY")
+      m = Model.set_table_text(m, id, ["h", 0], "1")
+      m = Model.set_table_text(m, id, ["e", 0, 0], "1")
+      m = Model.add_rule(m, id) |> Model.set_table_text(id, ["e", 1, 0], "1")
+
+      for {a, b} <- [{"1", "1.0"}, {"[1, 2]", "[1.0, 2.00]"}, {"{x: 1}", "{x: 1.0}"}] do
+        m2 = m |> Model.set_table_text(id, ["o", 0, 0], a) |> Model.set_table_text(id, ["o", 1, 0], b)
+        r = Eval.run(m2)[id]
+        assert r.table.message == nil, "#{a} vs #{b}: #{r.table.message}"
+        assert r.value != nil
+      end
+
+      m3 = m |> Model.set_table_text(id, ["o", 0, 0], "1") |> Model.set_table_text(id, ["o", 1, 0], "2")
+      assert Eval.run(m3)[id].table.message =~ "disagree"
     end
   end
 

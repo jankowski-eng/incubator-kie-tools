@@ -762,9 +762,21 @@ defmodule DmnSpike.Dmn do
   # an aggregated COLLECT table (SUM, MIN, ...) would be evaluated as a plain COLLECT, which gives the wrong
   # value, so it is kept as it is in the file, read-only
   defp table({_, attrs, _} = e) do
-    case attr(attrs, "aggregation") do
-      nil -> editable_table(e)
-      agg -> {:other, "decisionTable with aggregation #{agg}"}
+    defaults? =
+      for(
+        {t, _, ok} <- children(e),
+        local(t) == "output",
+        {d, _, _} <- Enum.filter(ok, &is_tuple/1),
+        local(d) == "defaultOutputEntry",
+        do: d
+      )
+      |> Enum.any?()
+
+    cond do
+      agg = attr(attrs, "aggregation") -> {:other, "decisionTable with aggregation #{agg}"}
+      # what the table returns when no rule matches is not modelled, so it would silently be null
+      defaults? -> {:other, "decisionTable with a default output entry"}
+      true -> editable_table(e)
     end
   end
 

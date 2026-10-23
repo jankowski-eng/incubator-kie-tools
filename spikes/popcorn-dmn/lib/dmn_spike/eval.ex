@@ -126,13 +126,24 @@ defmodule DmnSpike.Eval do
 
   defp hit("ANY", [{_, v} | _] = m),
     do:
-      if(Enum.all?(m, fn {_, x} -> x == v end),
+      if(Enum.all?(m, fn {_, x} -> same?(x, v) end),
         do: {v, nil},
         else: {nil, "matching rules disagree, ANY needs equal outputs"}
       )
 
   defp hit(p, m) when p in ["COLLECT", "RULE ORDER"], do: {Enum.map(m, &elem(&1, 1)), nil}
   defp hit(_, _), do: {nil, "unsupported hit policy"}
+
+  # FEEL equality: 1 and 1.0 are the same number, also inside lists and contexts
+  defp same?(%Decimal{} = a, %Decimal{} = b), do: Decimal.equal?(a, b)
+
+  defp same?(a, b) when is_list(a) and is_list(b),
+    do: length(a) == length(b) and Enum.zip_with(a, b, &same?/2) |> Enum.all?()
+
+  defp same?(a, b) when is_map(a) and is_map(b) and not is_struct(a) and not is_struct(b),
+    do: map_size(a) == map_size(b) and Enum.all?(a, fn {k, x} -> Map.has_key?(b, k) and same?(x, Map.fetch!(b, k)) end)
+
+  defp same?(a, b), do: a == b
 
   defp test_entry(entry, value, env, scope) do
     if String.trim(entry) in ["", "-"] do

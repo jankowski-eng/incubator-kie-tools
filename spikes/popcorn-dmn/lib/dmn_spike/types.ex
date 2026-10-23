@@ -186,6 +186,9 @@ defmodule DmnSpike.Types do
       String.trim(t.name) == "" ->
         "A name is required"
 
+      length(path) == 1 and t.name in @builtins ->
+        "\"#{t.name}\" is a built-in type"
+
       Enum.any?(Enum.with_index(siblings(types, path)), fn {x, i} -> i != own and x.name == t.name end) ->
         "\"#{t.name}\" is already used here"
 
@@ -230,7 +233,21 @@ defmodule DmnSpike.Types do
           Map.get(c, :type_ref) == name,
           do: "#{n.name} (#{label} column #{i})"
 
-    %{nodes: Enum.sort(nodes ++ columns), types: for(t <- m.types, label <- refs_in(t, t.name, name), do: label)}
+    # references that only the original file holds (a business knowledge model's parameters, expressions that
+    # are kept read-only) count too: deleting the type would leave them undefined
+    shown = MapSet.new(nodes)
+
+    retained =
+      for {node, ref} <- DmnSpike.Dmn.Overlay.retained_type_refs(m),
+          ref == name,
+          not MapSet.member?(shown, node),
+          uniq: true,
+          do: "#{node} (kept from the file)"
+
+    %{
+      nodes: Enum.sort(nodes ++ columns ++ retained),
+      types: for(t <- m.types, label <- refs_in(t, t.name, name), do: label)
+    }
   end
 
   defp refs_in(t, label, name) do
@@ -266,7 +283,9 @@ defmodule DmnSpike.Types do
     from = effective(t)
     others = List.delete_at(m.types, i)
 
-    if String.trim(new) == "" or Enum.any?(others, &(&1.name == new or effective(&1) == new)) do
+    # a built-in name is no more usable than an empty or a taken one: references would resolve to the built-in
+    if String.trim(new) == "" or new in @builtins or
+         Enum.any?(others, &(&1.name == new or effective(&1) == new)) do
       %{m | types: List.replace_at(m.types, i, t |> Map.put(:name, new) |> Map.put(:committed, from))}
     else
       m = rename_refs(m, from, new)
