@@ -8,36 +8,33 @@ defmodule DmnSpike.Problems do
 
   alias DmnSpike.{Fmt, Model, Types}
 
-  @type problem :: %{
-          severity: :error | :warning,
-          target: {:node, String.t()} | {:type, non_neg_integer()},
-          title: String.t(),
-          message: String.t()
-        }
-
   @doc "Problems of `model` given the evaluation `results`, errors first, then by name."
   def list(%Model{} = m, results) do
+    # worked out once for the whole model, not per node: the list is rebuilt after every edit
+    ctx = %{
+      drg: Enum.count(m.nodes, fn {_, n} -> not Model.artifact?(n) end),
+      connected: for({a, b, _} <- Model.edges_all(m), id <- [a, b], into: MapSet.new(), do: id),
+      null_inputs: for({from, to, _} <- m.edges, match?(%{value: nil}, results[from]), into: MapSet.new(), do: to)
+    }
+
     node_problems =
-      for {id, node} <- m.nodes, not Model.artifact?(node), p <- of_node(m, node, results[id], results), do: p
+      for {id, node} <- m.nodes, not Model.artifact?(node), p <- of_node(node, results[id], ctx), do: p
 
     (node_problems ++ type_problems(m.types))
     |> Enum.sort_by(&{&1.severity != :error, String.downcase(&1.title), &1.message})
   end
 
-  defp of_node(m, node, result, results) do
+  defp of_node(node, result, ctx) do
     target = {:node, node.id}
     mk = fn severity, message -> %{severity: severity, target: target, title: node.name, message: message} end
 
-    cell_problems(node, result, mk, upstream_null?(m, node, results)) ++
+    cell_problems(node, result, mk, MapSet.member?(ctx.null_inputs, node.id)) ++
       for(e <- (result && result.errors) || [], do: mk.(:error, "value does not fit its type: " <> e)) ++
-      table_problems(node, result, mk) ++ empty_problems(node, mk) ++ isolated_problems(m, node, mk)
+      table_problems(node, result, mk) ++ empty_problems(node, mk) ++ isolated_problems(ctx, node, mk)
   end
 
-  # An operand that is null because something it needs is null (or failed) is the symptom, not the problem,
-  # so those warnings are left out while an upstream value is missing.
-  defp upstream_null?(m, node, results) do
-    Enum.any?(m.edges, fn {from, to, _} -> to == node.id and match?(%{value: nil}, results[from]) end)
-  end
+  # `ctx.null_inputs`: nodes with an upstream value that is null or failed. An operand that is null because
+  # something it needs is null is the symptom, not the problem, so those warnings are left out for them.
 
   # FEEL errors and warnings in the cells of a context or literal
   defp cell_problems(node, %{cells: cells}, mk, quiet?) when cells != [] do
@@ -115,11 +112,10 @@ defmodule DmnSpike.Problems do
 
   defp empty_problems(_node, _mk), do: []
 
-  defp isolated_problems(m, node, mk) do
-    drg = Enum.count(m.nodes, fn {_, n} -> not Model.artifact?(n) end)
-    touches? = Enum.any?(Model.edges_all(m), fn {a, b, _} -> node.id in [a, b] end)
-
-    if drg > 1 and not touches?, do: [mk.(:warning, "is not connected to anything")], else: []
+  defp isolated_problems(ctx, node, mk) do
+    if ctx.drg > 1 and not MapSet.member?(ctx.connected, node.id),
+      do: [mk.(:warning, "is not connected to anything")],
+      else: []
   end
 
   # invalid constraint text on a data type or one of its components

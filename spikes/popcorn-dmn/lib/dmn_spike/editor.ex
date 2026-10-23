@@ -348,6 +348,8 @@ defmodule DmnSpike.Editor do
   def init(_) do
     state = %{
       model: Model.sample(),
+      # what was last saved or loaded, as `{dmn_part, scenarios}`: the page warns before it is left with more
+      saved: nil,
       past: [],
       future: [],
       selected: "front",
@@ -381,7 +383,7 @@ defmodule DmnSpike.Editor do
       hint: true
     }
 
-    {:ok, state, {:continue, :setup}}
+    {:ok, %{state | saved: saved_of(state.model)}, {:continue, :setup}}
   end
 
   @impl true
@@ -635,10 +637,9 @@ defmodule DmnSpike.Editor do
         if unmatched > 0, do: " (#{unmatched} value#{if unmatched > 1, do: "s"} had no input of that name)", else: ""
 
       state = push_history(state, nil)
-      state = render_all(%{state | model: model}, true)
+      state = render_all(%{state | model: model, saved: {elem(state.saved, 0), Model.scenarios(model)}}, true)
       say(state, "loaded #{n} scenario#{if n > 1, do: "s"} from #{file}#{miss}")
     else
-      {:error, %{} = _json} -> say(state, "✗ #{file} is not a scenarios file", :error)
       {:error, msg} when is_binary(msg) -> say(state, "✗ #{file}: #{msg}", :error)
       _ -> say(state, "✗ #{file} is not a scenarios file", :error)
     end
@@ -652,7 +653,15 @@ defmodule DmnSpike.Editor do
         selected = model.nodes |> Map.values() |> Enum.find(&(&1.type == :decision)) |> then(&(&1 && &1.id))
 
         render_all(
-          %{state | model: model, selected: selected, sel_edge: nil, report: {:ok, file, report}, name: name},
+          %{
+            state
+            | model: model,
+              selected: selected,
+              sel_edge: nil,
+              report: {:ok, file, report},
+              name: name,
+              saved: saved_of(model)
+          },
           true
         )
 
@@ -680,7 +689,8 @@ defmodule DmnSpike.Editor do
         name: "Untitled",
         hint: true,
         tab: "editor",
-        connect: nil
+        connect: nil,
+        saved: saved_of(%Model{})
     }
 
     state |> render_all(true) |> say("New DMN created. Undo brings the previous one back.")
@@ -725,16 +735,17 @@ defmodule DmnSpike.Editor do
     file = file_base(state) <> ".scenarios.json"
     json = state.model |> Model.export_scenarios() |> Map.put("model", state.name) |> JSON.encode!()
     JS.run!(@download_js, %{xml: json, name: file, type: "application/json"})
-
-    say(
-      state,
-      "saved #{length(state.model.scenarios)} scenario#{if length(state.model.scenarios) > 1, do: "s"} to #{file}"
-    )
+    state = %{state | saved: {elem(state.saved, 0), Model.scenarios(state.model)}}
+    patch([unsaved_op(state)])
+    n = length(state.model.scenarios)
+    say(state, "saved #{n} scenario#{if n > 1, do: "s"} to #{file}")
   end
 
   defp event(%{"t" => "click", "what" => "export"}, state) do
     file = file_base(state) <> ".dmn"
     JS.run!(@download_js, %{xml: Dmn.to_xml(state.model, state.name), name: file})
+    state = %{state | saved: {Model.dmn_part(state.model), elem(state.saved, 1)}}
+    patch([unsaved_op(state)])
     say(state, "exported #{file}")
   end
 
@@ -1449,7 +1460,8 @@ defmodule DmnSpike.Editor do
     problem_ops = [
       ["html", "#problems-btn", label],
       ["attr", "#problems-btn", "data-level", level],
-      ["html", "#problems-list", Problems.html(problems, 100)]
+      ["html", "#problems-list", Problems.html(problems, 100)],
+      unsaved_op(state)
     ]
 
     node_ops ++
@@ -1658,6 +1670,10 @@ defmodule DmnSpike.Editor do
 
     if return_state?, do: state, else: :ok
   end
+
+  defp saved_of(m), do: {Model.dmn_part(m), Model.scenarios(m)}
+  defp unsaved?(state), do: saved_of(state.model) != state.saved
+  defp unsaved_op(state), do: ["attr", "body", "data-unsaved", to_string(unsaved?(state))]
 
   defp file_base(state),
     do: state.name |> String.replace(~r/[^\w\- ]+/u, "") |> String.trim() |> String.replace(" ", "-")

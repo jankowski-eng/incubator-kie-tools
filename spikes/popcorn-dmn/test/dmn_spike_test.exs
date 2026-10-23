@@ -1450,6 +1450,17 @@ defmodule DmnSpikeTest do
       assert out =~ "x + 2"
     end
 
+    test "only our own value element counts as a test value, not another vendor's" do
+      xml =
+        ~s|<definitions #{@ns} xmlns:p="urn:popcorn-dmn-spike" xmlns:v="urn:vendor"><inputData id="i" name="In"><variable id="iv" name="In"/><extensionElements><v:value>vendor data</v:value></extensionElements></inputData><inputData id="j" name="Jn"><variable id="jv" name="Jn"/><extensionElements><v:value>vendor</v:value><p:value>mine</p:value></extensionElements></inputData></definitions>|
+
+      {m, _} = import_xml!(xml)
+      assert m.nodes["i"].expr.result == ""
+      assert m.nodes["j"].expr.result == "mine"
+      out = m |> Model.rename("i", "In2") |> Dmn.to_xml()
+      assert out =~ "<v:value>vendor data</v:value>", "the vendor element is kept"
+    end
+
     test "a test value saved into the file by an earlier version becomes the first scenario and is dropped on save" do
       xml =
         ~s|<definitions #{@ns} xmlns:p="urn:popcorn-dmn-spike"><inputData id="i" name="In"><variable id="iv" name="In"/><extensionElements><p:value>1</p:value><other xmlns="urn:x"/></extensionElements></inputData></definitions>|
@@ -1705,6 +1716,22 @@ defmodule DmnSpikeTest do
       assert msg =~ "tApplicant.Income: invalid constraint"
     end
 
+    test "building the list stays fast on a big model (no per-node scan of everything)" do
+      m =
+        Enum.reduce(1..3000, %Model{}, fn i, m ->
+          {m, id} = Model.add_node(m, "decision", i * 10, 0)
+          Model.set_text(m, id, 0, "1")
+        end)
+
+      ids = m.nodes |> Map.keys() |> Enum.sort()
+      # edges set directly: connect/3 checks for cycles, which is not what is being timed here
+      m = %{m | edges: ids |> Enum.chunk_every(2, 1, :discard) |> Enum.map(fn [a, b] -> {a, b, :info} end)}
+      results = Eval.run(m)
+      {us, found} = :timer.tc(fn -> Problems.list(m, results) end)
+      assert found == []
+      assert us < 300_000, "took #{div(us, 1000)} ms"
+    end
+
     test "errors come first and the popover text is escaped" do
       {m, id} = Model.add_node(Model.sample(), "decision", 10, 10)
       m = Model.rename(m, id, "<b>x</b>") |> Model.set_text("front", 0, "1 +")
@@ -1796,6 +1823,14 @@ defmodule DmnSpikeTest do
                Model.import_scenarios(Model.sample(), %{"scenarios" => [%{"name" => "x", "inputs" => %{"a" => 1}}]})
 
       assert {:error, _} = Model.import_scenarios(Model.sample(), %{"other" => 1})
+    end
+
+    test "dmn_part is the model without its test data" do
+      m = Model.sample()
+      assert Model.dmn_part(m) == Model.dmn_part(Model.set_text(m, "app", 0, "{Income: 1}"))
+      assert Model.dmn_part(m) == Model.dmn_part(Model.new_scenario(m, "B"))
+      assert Model.dmn_part(m) != Model.dmn_part(Model.rename(m, "front", "Other"))
+      assert Model.dmn_part(m) != Model.dmn_part(Model.move(m, "front", 1, 1))
     end
 
     test "test values are not written into the DMN file, and are not an edit to it" do

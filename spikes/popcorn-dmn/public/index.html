@@ -3108,6 +3108,13 @@
         document.addEventListener("keydown", (e) => {
           if (e.key === "Escape") setPop(false);
         });
+        // everything lives in this page: leaving it with changes that were not exported or saved asks first
+        window.addEventListener("beforeunload", (e) => {
+          if (document.body.dataset.unsaved === "true") {
+            e.preventDefault();
+            e.returnValue = "";
+          }
+        });
         const help = document.getElementById("help");
         const btn = document.getElementById("help-btn");
         const show = (on) => {

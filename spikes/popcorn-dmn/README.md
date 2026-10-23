@@ -44,7 +44,7 @@ The model covers only part of DMN, so saving must not damage the rest. `Dmn.Over
 
 Known limits: comments inside the document (only those before the root are kept), a DOCTYPE, formatting and attribute whitespace are normalised; editing a data type regenerates its components (their ids are not kept).
 
-Test data: the values of input data nodes belong to a **scenario**, not to the file. The Scenario menu in the toolbar switches, adds, renames and deletes scenarios (a new one starts as a copy) and saves or loads them as a JSON file keyed by input name (`Save scenarios`, `Load scenarios…`). A file written by an earlier version that holds a `spike:value` extension element opens with that value in the first scenario and loses the element on the next save. Scenarios are not remembered between page loads: save them.
+Test data: the values of input data nodes belong to a **scenario**, not to the file. The Scenario menu in the toolbar switches, adds, renames and deletes scenarios (a new one starts as a copy) and saves or loads them as a JSON file keyed by input name (`Save scenarios`, `Load scenarios…`). A file written by an earlier version that holds a `spike:value` extension element opens with that value in the first scenario and loses the element on the next save. Scenarios are not remembered between page loads: save them. The page asks before it is closed or reloaded while the model or the scenarios differ from what was last exported, saved or loaded.
 
 ## Embedding
 
@@ -52,7 +52,7 @@ Where the editor can and cannot run (iframes, popups, VS Code) is measured in [E
 
 ## Verification
 
-`mix test` covers the pure logic (596 tests, 450 of them random-edit round trips validated against DMN16.xsd, including the real KIE sample and the open-and-save guarantees). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, workspace layout and on-canvas actions, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
+`mix test` covers the pure logic (599 tests, 450 of them random-edit round trips validated against DMN16.xsd, including the real KIE sample and the open-and-save guarantees). `e2e/*.mjs` drive the running dev server with Playwright and Chrome (editing, diagram and data types, decision tables, DMN XML round trip, pan and zoom, workspace layout and on-canvas actions, the real KIE `Sample.dmn` imported and evaluated, 1,000-node scale and drag latency); see the header of each file for how to run it.
 
 Notes from building this:
 

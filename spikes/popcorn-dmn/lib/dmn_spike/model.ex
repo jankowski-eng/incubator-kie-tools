@@ -149,6 +149,9 @@ defmodule DmnSpike.Model do
     %{m | nodes: nodes}
   end
 
+  @doc "The model without its test data: what is saved in the DMN file (and what an unsaved edit changes)."
+  def dmn_part(%__MODULE__{} = m), do: %{load_values(m, %{}) | scenarios: [], scenario: 0}
+
   def switch_scenario(%__MODULE__{} = m, i) do
     all = scenarios(m)
 

@@ -149,12 +149,10 @@ defmodule DmnSpike.Dmn do
       end
 
     desc = description_xml(n)
-    # the schema puts extensionElements (the value of an input) before the variable
-    {ext, body} = if n.type == :input, do: {body, []}, else: {[], body}
     reqs = info ++ know ++ authority_xml(m, n)
     # a business knowledge model's logic comes before its requirements; a decision's expression after them
     tail = if n.type == :bkm, do: body ++ reqs, else: reqs ++ body
-    el(tag, [{"id", n.id}, {"name", n.name}], desc ++ ext ++ [var] ++ tail)
+    el(tag, [{"id", n.id}, {"name", n.name}], desc ++ [var] ++ tail)
   end
 
   @doc false
@@ -436,7 +434,12 @@ defmodule DmnSpike.Dmn do
     types =
       for {tag, _, _} = e <- children, local(tag) == "itemDefinition", t = item(e), do: Map.put(t, :origin, t.name)
 
-    {nodes, notes} = for({tag, _, _} = e <- children, @elements[local(tag)], do: read_node(e)) |> Enum.unzip()
+    # the prefixes this document gives our (earlier versions') test-value namespace
+    spike = for {"xmlns:" <> p, uri} <- attrs, String.contains?(uri, "popcorn-dmn-spike"), do: p
+
+    {nodes, notes} =
+      for({tag, _, _} = e <- children, @elements[local(tag)], do: read_node(e, spike)) |> Enum.unzip()
+
     nodes = Map.new(nodes, &{&1.id, &1})
     reqs = requirements(children, nodes)
     {shapes, extra_diagrams} = shapes(children)
@@ -584,12 +587,12 @@ defmodule DmnSpike.Dmn do
 
   # nodes ----------------------------------------------------------------------------
 
-  defp read_node({tag, attrs, kids}) do
+  defp read_node({tag, attrs, kids}, spike) do
     kids = Enum.filter(kids, &is_tuple/1)
     type = @elements[local(tag)]
     id = attr(attrs, "id") || "n-#{:erlang.unique_integer([:positive])}"
     var = find(kids, "variable")
-    {expr, expr_notes} = expression(type, kids)
+    {expr, expr_notes} = expression(type, kids, spike)
     name = if type == :annotation, do: text(find(kids, "text")) || "", else: attr(attrs, "name") || id
 
     n = %{
@@ -608,15 +611,21 @@ defmodule DmnSpike.Dmn do
     {n, Enum.map(expr_notes, &"#{name}: #{&1}")}
   end
 
-  defp expression(type, _kids) when type in [:annotation, :source, :group], do: {Model.artifact_expr(), []}
+  defp expression(type, _kids, _spike) when type in [:annotation, :source, :group], do: {Model.artifact_expr(), []}
 
-  defp expression(:input, kids) do
-    ext = find(kids, "extensionElements")
-    value = ext && ext |> children() |> find("value") |> text()
+  # An input's test value used to be saved in an extension element of ours. Only that element counts (its
+  # prefix is the one the document declares for our namespace): another vendor's `value` is not test data.
+  defp expression(:input, kids, spike) do
+    ours = Enum.map(spike, &(&1 <> ":value"))
+
+    value =
+      for({t, _, _} = c <- children(find(kids, "extensionElements") || {nil, [], []}), t in ours, do: text(c))
+      |> List.first()
+
     {%{rows: [], result: value || ""}, []}
   end
 
-  defp expression(:bkm, kids) do
+  defp expression(:bkm, kids, spike) do
     case find(kids, "encapsulatedLogic") do
       nil ->
         {%{rows: [], result: "", params: []}, []}
@@ -625,7 +634,7 @@ defmodule DmnSpike.Dmn do
         params = for {t, a, _} <- Enum.filter(lk, &is_tuple/1), local(t) == "formalParameter", do: attr(a, "name")
 
         {body, notes} =
-          case expression(:decision, children(logic)) do
+          case expression(:decision, children(logic), spike) do
             {%{kind: :table}, notes} ->
               {%{kind: :raw, tag: "decisionTable"},
                ["kept: decision table in a business knowledge model, read-only" | notes]}
@@ -638,7 +647,7 @@ defmodule DmnSpike.Dmn do
     end
   end
 
-  defp expression(:decision, kids) do
+  defp expression(:decision, kids, _spike) do
     case first_expression(kids) do
       nil -> {%{rows: [], result: ""}, []}
       {:literal, t} -> {%{rows: [], result: t}, []}

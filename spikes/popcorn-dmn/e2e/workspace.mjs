@@ -503,6 +503,60 @@ for (let i = 0; i < 8; i++) {
   await settle(250);
 }
 
+// leaving the page with unsaved changes asks first
+const unsaved = () => page.locator("body").getAttribute("data-unsaved");
+// the page has been edited a lot by now: leaving it must ask
+ok("the page is unsaved after all those edits", (await unsaved()) === "true");
+let asked = null;
+page.once("dialog", (d) => {
+  asked = d.type();
+  d.accept();
+});
+await page.goto("http://localhost:4000");
+await page.waitForFunction(() => document.querySelector("#panel table"), null, { timeout: 90000 });
+ok("leaving it asks first", asked === "beforeunload", String(asked));
+ok("a fresh page has nothing to save", (await unsaved()) === "false");
+await page.locator('#scene g[data-id="front"] .shape').click();
+await settle(300);
+await page.locator('[data-click="dock:expr"]').click();
+await page.locator('textarea[data-cell="front:0"]').fill("1 + 1");
+await settle(500);
+ok("an edit makes the page unsaved", (await unsaved()) === "true");
+await page.locator("[data-click=undo]").click();
+await settle(500);
+ok("undoing it makes it clean again", (await unsaved()) === "false");
+// the inspector floats over the bottom of the canvas: close it to reach the input
+await page.keyboard.press("Escape");
+await settle(300);
+await page.locator('#scene g[data-id="app"] .shape').click();
+await settle(300);
+await page.locator('textarea[data-cell="app:0"]').fill("{Income: 5}");
+await settle(500);
+ok("a changed test value counts too", (await unsaved()) === "true");
+await page.locator("#scn-toggle").click();
+const [saved] = await Promise.all([
+  page.waitForEvent("download", { timeout: 15000 }),
+  page.locator("[data-click='scn:save']").click(),
+]);
+await settle(400);
+ok("saving the scenarios clears it", (await unsaved()) === "false", saved.suggestedFilename());
+await page.locator('#scene g[data-id="front"] .shape').click();
+await page.locator('textarea[data-cell="front:0"]').fill("2 + 2");
+await settle(500);
+ok("a DMN edit is unsaved again", (await unsaved()) === "true");
+await page.getByRole("button", { name: /File/ }).click();
+await Promise.all([
+  page.waitForEvent("download", { timeout: 15000 }),
+  page.getByRole("menuitem", { name: "Export DMN" }).click(),
+]);
+await settle(400);
+ok("exporting the DMN clears it", (await unsaved()) === "false");
+for (let i = 0; i < 8; i++) {
+  if (await page.locator("[data-click=undo]").isDisabled()) break;
+  await page.locator("[data-click=undo]").click();
+  await settle(250);
+}
+
 // type pill
 await page.locator('#scene g[data-id="front"] .shape').click();
 await settle();
