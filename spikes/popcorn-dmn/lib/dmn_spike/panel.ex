@@ -232,7 +232,7 @@ defmodule DmnSpike.Panel do
       ~s|<select class="coltype" data-op="dttype" data-id="#{id}" data-path="#{path}" title="Type">#{type_options(m, current)}</select>|
 
   def type_options(%Model{} = m, current) do
-    for t <- [""] ++ DmnSpike.Types.builtins() ++ Enum.map(m.types, & &1.name), into: "" do
+    for t <- [""] ++ DmnSpike.Types.builtins() ++ Enum.map(m.types ++ m.ext_types, & &1.name), into: "" do
       sel = if t == (current || ""), do: " selected", else: ""
       ~s|<option value="#{Fmt.esc(t)}"#{sel}>#{if t == "", do: "&lt;Undefined&gt;", else: Fmt.esc(t)}</option>|
     end

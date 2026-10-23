@@ -20,10 +20,13 @@ defmodule DmnSpike.Model do
   # Scenarios are named sets of input values (test data). They are not part of the DMN file. The values of
   # the active one (`scenario`) live on the input nodes, where they are edited; `scenarios/1` gives the list
   # with those live values filled in.
+  # `ext_types` are the types of models the document imports, supplied by the host page: shown and checked like
+  # `types` but read-only and never written to the document (the `<import>` stays as the file has it)
   defstruct nodes: %{},
             edges: [],
             links: [],
             types: [],
+            ext_types: [],
             next: 1,
             doc: nil,
             anchors: %{},
@@ -150,7 +153,7 @@ defmodule DmnSpike.Model do
   end
 
   @doc "The model without its test data: what is saved in the DMN file (and what an unsaved edit changes)."
-  def dmn_part(%__MODULE__{} = m), do: %{load_values(m, %{}) | scenarios: [], scenario: 0}
+  def dmn_part(%__MODULE__{} = m), do: %{load_values(m, %{}) | scenarios: [], scenario: 0, ext_types: []}
 
   def switch_scenario(%__MODULE__{} = m, i) do
     all = scenarios(m)

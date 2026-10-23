@@ -64,7 +64,29 @@ defmodule DmnSpike.Types do
   # references use in `:committed`; lookups go by that name until a valid one is typed.
   defp effective(t), do: Map.get(t, :committed, t.name)
 
-  def find(%Model{types: types}, name), do: Enum.find(types, &(effective(&1) == name))
+  def find(%Model{types: types, ext_types: ext}, name),
+    do: Enum.find(types, &(effective(&1) == name)) || Enum.find(ext, &(&1.name == name))
+
+  @doc """
+  The types of the model imported as `import_name`, named the way a document that imports it refers to them
+  (`import_name.Type`). A `!` (not null) is dropped: the editor does not model nullability.
+  """
+  def external(import_name, types) do
+    prefix = fn
+      ref when ref in [nil, ""] ->
+        ref
+
+      ref ->
+        ref = String.trim_trailing(ref, "!")
+        if ref in @builtins, do: ref, else: import_name <> "." <> ref
+    end
+
+    walk = fn walk, t ->
+      %{t | ref: prefix.(t.ref), components: Enum.map(t.components, &walk.(walk, &1))}
+    end
+
+    for t <- types, do: %{walk.(walk, t) | name: import_name <> "." <> t.name}
+  end
 
   # --- validation ---------------------------------------------------------------
 

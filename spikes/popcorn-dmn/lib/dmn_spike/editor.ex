@@ -28,6 +28,9 @@ defmodule DmnSpike.Editor do
 
   @name :editor
 
+  # what a file or a page sends in chunks (see `sendFile`), and the event the whole text becomes
+  @chunk_events %{"scenarios" => "import_scenarios", "host" => "host_load", "host_types" => "host_types"}
+
   @patch_js """
   ({ops}) => {
     // element ids may contain dots (valid in DMN), which a CSS `#id` selector would read as a class
@@ -363,6 +366,9 @@ defmodule DmnSpike.Editor do
       report: nil,
       name: "Popcorn spike",
       upload: nil,
+      # embedded in a page: the dirty flag it was last told, and what `host_get_xml` handed out (what `host_saved` marks as saved)
+      notified: false,
+      snapshot: nil,
       view: nil,
       toast: 0,
       # Data types tab: selection, folded rows, search, inspector (:auto opens with the first selection), inline edit, FEEL-mode paths
@@ -391,13 +397,14 @@ defmodule DmnSpike.Editor do
     :ok = JS.await_ready()
     JS.run!(@events_js)
     render_all(state)
+    JS.send(%{"t" => "ready"})
     {:noreply, state}
   end
 
   @impl true
   # an exception in one event must not restart the editor (that would silently reset the model)
   def handle_info({:wasm, msg}, state) do
-    {:noreply, state |> then(&event(msg, &1)) |> then(&sync_xml(state, &1, msg))}
+    {:noreply, state |> then(&event(msg, &1)) |> then(&sync_xml(state, &1, msg)) |> then(&notify_dirty(state, &1))}
   rescue
     e ->
       {:noreply, say(state, "internal error: " <> inspect(e, limit: 4, printable_limit: 300), :error)}
@@ -624,7 +631,7 @@ defmodule DmnSpike.Editor do
 
     if map_size(parts) == n do
       text = 0..(n - 1) |> Enum.map_join(&Map.fetch!(parts, &1))
-      kind = if msg["kind"] == "scenarios", do: "import_scenarios", else: "import"
+      kind = Map.get(@chunk_events, msg["kind"], "import")
       event(%{"t" => kind, "text" => text, "name" => file}, %{state | upload: nil})
     else
       %{state | upload: {file, n, parts}}
@@ -658,7 +665,7 @@ defmodule DmnSpike.Editor do
         render_all(
           %{
             state
-            | model: model,
+            | model: %{model | ext_types: state.model.ext_types},
               selected: selected,
               sel_edge: nil,
               report: {:ok, file, report},
@@ -673,13 +680,55 @@ defmodule DmnSpike.Editor do
     end
   end
 
+  # The page that embeds the editor (see `public/index.html`) talks through these. A document it loads is not an
+  # edit: nothing to undo, nothing unsaved. Chunks of kind "host" arrive as `host_load`, of kind "host_types" as
+  # `host_types` (the model of an import, named by `name`).
+  defp event(%{"t" => "host_load"} = msg, state) do
+    state = event(%{msg | "t" => "import"}, state)
+    state = %{state | past: [], future: []}
+    patch(history_ops(state))
+
+    case state.report do
+      {:error, _file, message} -> JS.send(%{"t" => "error", "message" => message})
+      _ok -> JS.send(%{"t" => "loaded"})
+    end
+
+    state
+  end
+
+  defp event(%{"t" => "host_types", "text" => text, "name" => import_name}, state) do
+    case Dmn.from_xml(text) do
+      {:ok, model, _report} ->
+        keep = Enum.reject(state.model.ext_types, &String.starts_with?(&1.name, import_name <> "."))
+        %{state | model: %{state.model | ext_types: keep ++ Types.external(import_name, model.types)}}
+
+      {:error, message} ->
+        JS.send(%{"t" => "error", "message" => "#{import_name}: #{message}"})
+        state
+    end
+  end
+
+  defp event(%{"t" => "host_get_xml", "id" => id}, state) do
+    JS.send(%{"t" => "xml", "id" => id, "xml" => Dmn.to_xml(state.model, state.name)})
+    %{state | snapshot: saved_of(state.model)}
+  end
+
+  # what `host_get_xml` handed out is what was saved, not what was typed since
+  defp event(%{"t" => "host_saved"}, %{snapshot: snapshot} = state) when snapshot != nil do
+    state = %{state | saved: snapshot, snapshot: nil}
+    patch([unsaved_op(state)])
+    state
+  end
+
+  defp event(%{"t" => "host_saved"}, state), do: state
+
   # a blank model; the previous one stays one Undo away
   defp event(%{"t" => "click", "what" => "new-dmn"}, state) do
     state = push_history(state, nil)
 
     state = %{
       state
-      | model: %Model{},
+      | model: %Model{ext_types: state.model.ext_types},
         selected: nil,
         sel_edge: nil,
         tsel: nil,
@@ -1675,6 +1724,18 @@ defmodule DmnSpike.Editor do
   end
 
   defp saved_of(m), do: {Model.dmn_part(m), Model.scenarios(m)}
+
+  # the embedding page is told when the document turns unsaved or saved again
+  defp notify_dirty(old, new) do
+    if new.model == old.model and new.saved == old.saved do
+      new
+    else
+      dirty = unsaved?(new)
+      if dirty != new.notified, do: JS.send(%{"t" => "dirty", "dirty" => dirty})
+      %{new | notified: dirty}
+    end
+  end
+
   defp unsaved?(state), do: saved_of(state.model) != state.saved
   defp unsaved_op(state), do: ["attr", "body", "data-unsaved", to_string(unsaved?(state))]
 

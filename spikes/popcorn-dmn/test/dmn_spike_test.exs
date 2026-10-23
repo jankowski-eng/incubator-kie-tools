@@ -2216,4 +2216,59 @@ defmodule DmnSpikeTest do
       assert Dmn.to_xml(m) =~ ~s|id="#{id}"|
     end
   end
+
+  describe "types of an imported model (supplied by the page that embeds the editor)" do
+    alias DmnSpike.{Dmn, Types}
+
+    @ns "https://www.omg.org/spec/DMN/20230324/MODEL/"
+
+    # what the host sends: a model of item definitions only, with `!` (not null) in the type references
+    @imported ~s|<definitions xmlns="#{@ns}" namespace="https://lohn.li/datatypes" id="datatypes" name="Lohn.li">| <>
+                ~s|<itemDefinition id="Status" name="Status"><typeRef>string</typeRef><allowedValues><text>"a","b"</text></allowedValues></itemDefinition>| <>
+                ~s|<itemDefinition id="Employee" name="Employee">| <>
+                ~s|<itemComponent id="Employee.name" name="name" isCollection="false"><typeRef>string!</typeRef></itemComponent>| <>
+                ~s|<itemComponent id="Employee.status" name="status" isCollection="false"><typeRef>Status</typeRef></itemComponent>| <>
+                ~s|</itemDefinition></definitions>|
+
+    # a DMN 1.5 rule that imports it, as lohn.li stores rules
+    @rule ~s|<definitions xmlns="#{@ns}" namespace="n" name="R" id="r">| <>
+            ~s|<import id="i" name="lohn" namespace="https://lohn.li/datatypes" locationURI="datatypes.dmn" importType="#{@ns}"/>| <>
+            ~s|<inputData id="in" name="e"><variable id="v" name="e" typeRef="lohn.Employee"/></inputData>| <>
+            ~s|<decision id="d" name="D"><variable id="dv" name="D" typeRef="string"/>| <>
+            ~s|<informationRequirement id="ir"><requiredInput href="#in"/></informationRequirement>| <>
+            ~s|<literalExpression id="le"><text>e.name</text></literalExpression></decision></definitions>|
+
+    defp external, do: elem(Dmn.from_xml(@imported), 1).types |> then(&Types.external("lohn", &1))
+
+    test "they are named after the import, and their references follow" do
+      ext = external()
+      assert Enum.map(ext, & &1.name) == ["lohn.Status", "lohn.Employee"]
+      employee = Enum.find(ext, &(&1.name == "lohn.Employee"))
+      assert Enum.map(employee.components, &{&1.name, &1.ref}) == [{"name", "string"}, {"status", "lohn.Status"}]
+    end
+
+    test "a type of the import resolves and checks values; an unknown one does not" do
+      {:ok, m, _} = Dmn.from_xml(@rule)
+      m = %{m | ext_types: external()}
+
+      assert Types.ref_error(m, %{ref: "lohn.Employee"}) == nil
+      assert Types.ref_error(m, %{ref: "lohn.Nope"}) =~ "Unknown type"
+      assert Types.validate(m, %{"name" => "Ann", "status" => "a"}, "lohn.Employee") == []
+      assert [_ | _] = Types.validate(m, %{"name" => "Ann", "status" => "z"}, "lohn.Employee")
+      assert DmnSpike.Panel.type_options(m, "lohn.Employee") =~ ~s|value="lohn.Employee" selected|
+    end
+
+    test "they are never written to the document, which keeps its import and its DMN 1.5 namespace" do
+      {:ok, m, _} = Dmn.from_xml(@rule)
+      m = %{m | ext_types: external()}
+      out = m |> Model.rename("d", "Pay") |> Dmn.to_xml()
+
+      assert out =~ ~s|<import id="i" name="lohn"|
+      assert out =~ ~s|typeRef="lohn.Employee"|
+      assert out =~ "DMN/20230324/MODEL"
+      refute out =~ "<itemDefinition"
+      # they are not part of what is saved, so loading them does not make the document unsaved
+      assert Model.dmn_part(m) == Model.dmn_part(%{m | ext_types: []})
+    end
+  end
 end

@@ -3142,11 +3142,42 @@
         document.documentElement.dataset.popcorn = "unsupported";
       } else {
         try {
-          await Popcorn.init({
+          // Embedded in a page of the same origin (see EMBEDDING.md), the editor tells it what happens and takes
+          // its documents: the editor's messages (ready, loaded, dirty, xml, error) go up as
+          // {source: "dmn-editor", t, ...}, and the page's go down as {target: "dmn-editor", type, ...}:
+          // load {name, xml, externalTypes: [{importName, xml}]}, get_xml {id}, saved.
+          const host = window.parent !== window ? window.parent : null;
+          const booting = Popcorn.init({
             onStdout: console.log,
             onStderr: console.error,
+            onEvent: (m) => host && host.postMessage({ source: "dmn-editor", ...m }, location.origin),
             timeoutsMs: { boot: 120000, appStartup: 120000 },
           });
+          // Popcorn 0.4.0-next.9 traps when one JS->BEAM message is larger than 64 KiB: text goes in chunks
+          const sendText = async (popcorn, kind, name, text) => {
+            const parts = [], size = 16 * 1024;
+            for (let i = 0; i < text.length; ) {
+              let end = Math.min(i + size, text.length);
+              const c = text.charCodeAt(end - 1);
+              if (end < text.length && c >= 0xd800 && c <= 0xdbff) end--; // never split a surrogate pair
+              parts.push(text.slice(i, end));
+              i = end;
+            }
+            if (parts.length === 0) parts.push("");
+            for (const [i, part] of parts.entries())
+              await popcorn.send("editor", { t: "import_chunk", kind, name, i, n: parts.length, text: part });
+          };
+          window.addEventListener("message", async (e) => {
+            const m = e.data;
+            if (!host || e.source !== host || e.origin !== location.origin || !m || m.target !== "dmn-editor") return;
+            const popcorn = await booting;
+            if (m.type === "load") {
+              for (const t of m.externalTypes || []) await sendText(popcorn, "host_types", t.importName, t.xml);
+              await sendText(popcorn, "host", m.name, m.xml);
+            } else if (m.type === "get_xml") await popcorn.send("editor", { t: "host_get_xml", id: m.id });
+            else if (m.type === "saved") await popcorn.send("editor", { t: "host_saved" });
+          });
+          await booting;
           console.log(`popcorn booted in ${Math.round(performance.now() - t0)} ms`);
           document.documentElement.dataset.popcorn = "booted";
         } catch (e) {
