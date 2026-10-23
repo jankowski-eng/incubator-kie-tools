@@ -649,4 +649,6 @@ await page.screenshot({ path: `${OUT}/ws1.png` });
 await page.evaluate(() => document.activeElement?.blur());
 
 console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);
+// a runner (CI, a shell script) reads the result from the exit status
+process.exitCode = fails === 0 ? 0 : 1;
 await browser.close();

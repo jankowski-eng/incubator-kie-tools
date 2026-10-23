@@ -143,5 +143,7 @@ ok("view is kept while editing (no snap back to fit)", (await vb())[2] === z[2])
 await page.screenshot({ path: `${OUT}/z1.png` });
 
 console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);
+// a runner (CI, a shell script) reads the result from the exit status
+process.exitCode = fails === 0 ? 0 : 1;
 console.log(logs.filter((l) => !l.startsWith("[log] popcorn")).join("\n"));
 await browser.close();

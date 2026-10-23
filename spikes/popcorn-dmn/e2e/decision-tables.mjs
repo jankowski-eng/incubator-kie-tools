@@ -114,9 +114,15 @@ await page.evaluate(() => document.activeElement.blur());
 await page.mouse.move(2, 2);
 ok("row controls are hidden until hover", (await op('[data-click="dt-ins-rule:risk:3"]')) === 0);
 await page.locator("#dr-risk-2").hover();
-ok("hovering a rule shows insert and delete", (await op('[data-click="dt-ins-rule:risk:3"]')) === 1 && (await op('[data-click="dt-del-rule:risk:2"]')) === 1);
+ok(
+  "hovering a rule shows insert and delete",
+  (await op('[data-click="dt-ins-rule:risk:3"]')) === 1 && (await op('[data-click="dt-del-rule:risk:2"]')) === 1
+);
 await page.locator("table.dt th.in").nth(1).hover();
-ok("hovering a column header shows insert and delete", (await op('[data-click="dt-ins-input:risk:2"]')) === 1 && (await op('[data-click="dt-del-input:risk:1"]')) === 1);
+ok(
+  "hovering a column header shows insert and delete",
+  (await op('[data-click="dt-ins-input:risk:2"]')) === 1 && (await op('[data-click="dt-del-input:risk:1"]')) === 1
+);
 await page.locator("#dr-risk-2").hover();
 await page.locator('[data-click="dt-ins-rule:risk:3"]').click();
 await settle(500);
@@ -197,5 +203,7 @@ await settle(500);
 ok("…and back to a context", (await count("table.boxed.dt")) === 0 && (await count("textarea[data-cell]")) === 1);
 
 console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);
+// a runner (CI, a shell script) reads the result from the exit status
+process.exitCode = fails === 0 ? 0 : 1;
 console.log(logs.filter((l) => !l.startsWith("[log] popcorn")).join("\n"));
 await browser.close();

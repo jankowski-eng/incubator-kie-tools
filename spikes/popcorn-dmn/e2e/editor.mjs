@@ -11,7 +11,11 @@ page.on("console", (m) => {
   if (!m.text().includes("404")) logs.push(`[${m.type()}] ${m.text()}`.slice(0, 300));
 });
 page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`.slice(0, 300)));
-const ok = (name, cond, extra = "") => console.log(`${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  — " + extra : ""}`);
+let fails = 0;
+const ok = (name, cond, extra = "") => {
+  if (!cond) fails++;
+  console.log(`${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  — " + extra : ""}`);
+};
 const text = (sel) => page.locator(sel).first().textContent();
 const settle = (ms = 250) => page.waitForTimeout(ms);
 
@@ -157,4 +161,7 @@ ok(
   (await page.locator('textarea[data-cell="loan:0"]').inputValue()).slice(0, 50)
 );
 console.log(logs.join("\n"));
+console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);
+// a runner (CI, a shell script) reads the result from the exit status
+process.exitCode = fails === 0 ? 0 : 1;
 await browser.close();

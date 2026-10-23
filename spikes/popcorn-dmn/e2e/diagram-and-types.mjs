@@ -43,11 +43,7 @@ ok(
   "types tab visible, editor hidden",
   (await page.locator("#view-editor").isHidden()) && (await page.locator("#view-types").isVisible())
 );
-ok(
-  "tree shows 5 types + 7 components",
-  (await count("#ttree .trow")) === 12,
-  String(await count("#ttree .trow"))
-);
+ok("tree shows 5 types + 7 components", (await count("#ttree .trow")) === 12, String(await count("#ttree .trow")));
 ok(
   "struct has +field, scalar does not",
   (await count('[data-click="tadd-child:0"]')) === 1 && (await count('[data-click="tadd-child:2"]')) === 0
@@ -96,7 +92,10 @@ await page.locator("#trow-3").click();
 await settle(300);
 await page.locator('[data-click="cmode:3:none"]').click();
 await settle(400);
-ok("no constraint: nothing to edit", (await count('[data-op=ctext], [data-op=citem]')) === 0 && (await text("#trow-3 .tcons")) === "—");
+ok(
+  "no constraint: nothing to edit",
+  (await count("[data-op=ctext], [data-op=citem]")) === 0 && (await text("#trow-3 .tcons")) === "—"
+);
 await page.locator('#trow-0 [data-click="tadd-child:0"]').click();
 await settle(400);
 await page.keyboard.press("Enter");
@@ -123,7 +122,9 @@ await page.locator('[data-click="add-type"]').click();
 await settle(400);
 ok(
   "adding a data type creates it, selected and ready to rename",
-  (await count("#ttree .trow")) === rowsBefore + 1 && (await count("#ttree .trow.sel")) === 1 && (await count("#ttree input.tedit")) === 1
+  (await count("#ttree .trow")) === rowsBefore + 1 &&
+    (await count("#ttree .trow.sel")) === 1 &&
+    (await count("#ttree input.tedit")) === 1
 );
 await page.keyboard.press("Enter");
 await settle(300);
@@ -282,5 +283,7 @@ ok("Backspace on the canvas still deletes the selected node", (await count("#sce
 ok("editor listeners are installed once", await page.evaluate(() => window.__dmnEditorBound === true));
 
 console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);
+// a runner (CI, a shell script) reads the result from the exit status
+process.exitCode = fails === 0 ? 0 : 1;
 console.log(logs.filter((l) => !l.startsWith("[log] popcorn")).join("\n"));
 await browser.close();

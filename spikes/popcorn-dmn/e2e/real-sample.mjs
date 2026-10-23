@@ -152,7 +152,8 @@ await clickNode(`#scene [data-id="${ids["Loan Pre-Qualification"]}"]`, { force: 
 await settle(500);
 ok(
   "the table highlights the matching rule (rule 2)",
-  (await page.locator("tr.rule.hit").count()) === 1 && (await page.locator("tr.rule.hit td.rn").evaluate((e) => e.firstChild.textContent)) === "2"
+  (await page.locator("tr.rule.hit").count()) === 1 &&
+    (await page.locator("tr.rule.hit td.rn").evaluate((e) => e.firstChild.textContent)) === "2"
 );
 ok(
   "two output columns with names",
@@ -201,10 +202,13 @@ ok(
 );
 
 // export the whole thing and bring it back
-const [dl] = await Promise.all([page.waitForEvent("download"), (async () => {
+const [dl] = await Promise.all([
+  page.waitForEvent("download"),
+  (async () => {
     await page.getByRole("button", { name: /File/ }).click();
     await page.getByRole("menuitem", { name: "Export DMN" }).click();
-  })()]);
+  })(),
+]);
 await dl.saveAs(`${OUT}/real-export.dmn`);
 await page.locator("#file").setInputFiles(`${OUT}/real-export.dmn`);
 await settle(1200);
@@ -215,5 +219,7 @@ ok(
   report2.slice(0, 160)
 );
 console.log(`\n${fails === 0 ? "ALL PASSED" : fails + " FAILED"}`);
+// a runner (CI, a shell script) reads the result from the exit status
+process.exitCode = fails === 0 ? 0 : 1;
 console.log(logs.filter((l) => !l.startsWith("[log] popcorn")).join("\n"));
 await browser.close();

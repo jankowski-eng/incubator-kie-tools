@@ -419,7 +419,14 @@ defmodule DmnSpikeTest do
                "required"
 
       assert DmnSpike.Types.ref_error(m, %{ref: "tNope"}) =~ "Unknown"
-      assert DmnSpike.Types.usages(m, "tRatio").nodes == ["Back End Ratio", "Front End Ratio"]
+
+      assert DmnSpike.Types.usages(m, "tRatio").nodes == [
+               "Back End Ratio",
+               "Front End Ratio",
+               "Risk Category (input column 1)",
+               "Risk Category (input column 2)"
+             ]
+
       assert DmnSpike.Types.usages(m, "tApplicant").nodes == ["Applicant Data"]
       assert DmnSpike.Types.base(m, %{ref: "tRatio"}) == "number"
       assert DmnSpike.Types.fetch(m.types, [9]) == nil and DmnSpike.Types.fetch(m.types, [0, 9]) == nil
@@ -1845,6 +1852,59 @@ defmodule DmnSpikeTest do
       out = m |> Model.set_text(id, 0, "{Income: 1}") |> Dmn.to_xml()
       canon = fn xml -> xml |> Saxy.SimpleForm.parse_string() |> elem(1) end
       assert canon.(out) == canon.(original), "changing a test value leaves the file as it was"
+    end
+  end
+
+  describe "renaming a data type" do
+    alias DmnSpike.Dmn
+
+    defp idx(m, name), do: Enum.find_index(m.types, &(&1.name == name))
+
+    test "decision table columns follow a rename, so the export has no undefined type" do
+      m = Model.sample()
+      renamed = Types.rename_top(m, idx(m, "tRatio"), "tShare")
+      assert Enum.all?(renamed.nodes["risk"].expr.inputs, &(&1.type_ref == "tShare"))
+      refute Dmn.to_xml(renamed) =~ ~s|"tRatio"|
+      refute Dmn.to_xml(renamed) =~ ">tRatio<"
+    end
+
+    test "a column alone keeps a type in use" do
+      m = Model.sample()
+      # no node has tCategory except Risk Category: take that away and only its output column uses it
+      m = Model.set_type_ref(m, "risk", nil)
+      assert Types.usages(m, "tCategory").nodes == ["Risk Category (output column 1)"]
+    end
+
+    test "typing a taken name for a moment does not merge the references of two types" do
+      m = Model.sample()
+      a = idx(m, "tRatio")
+      b = idx(m, "tVerdict")
+      verdict_users = for {id, n} <- m.nodes, n.type_ref == "tVerdict", do: id
+      ratio_users = for {id, n} <- m.nodes, n.type_ref == "tRatio", do: id
+
+      # tRatio -> tVerdict (taken), then corrected to tShare
+      m = Types.rename_top(m, a, "tVerdict")
+
+      assert for({id, n} <- m.nodes, n.type_ref == "tVerdict", do: id) |> Enum.sort() == Enum.sort(verdict_users),
+             "nothing was redirected while the name was taken"
+
+      assert Types.find(m, "tRatio"), "references to the old name still find the type"
+      assert Types.validate(m, Decimal.new(5), "tRatio") == []
+      m = Types.rename_top(m, a, "tShare")
+      assert for({id, n} <- m.nodes, n.type_ref == "tShare", do: id) |> Enum.sort() == Enum.sort(ratio_users)
+      assert for({id, n} <- m.nodes, n.type_ref == "tVerdict", do: id) |> Enum.sort() == Enum.sort(verdict_users)
+      assert Enum.at(m.types, a).name == "tShare" and not Map.has_key?(Enum.at(m.types, a), :committed)
+      assert Enum.at(m.types, b).name == "tVerdict"
+    end
+
+    test "an empty name is a draft too" do
+      m = Model.sample()
+      i = idx(m, "tRatio")
+      users = for {id, n} <- m.nodes, n.type_ref == "tRatio", do: id
+      m = Types.rename_top(m, i, "")
+      assert for({id, n} <- m.nodes, n.type_ref == "tRatio", do: id) |> Enum.sort() == Enum.sort(users)
+      m = Types.rename_top(m, i, "tShare")
+      assert for({id, n} <- m.nodes, n.type_ref == "tShare", do: id) |> Enum.sort() == Enum.sort(users)
     end
   end
 

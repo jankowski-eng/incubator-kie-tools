@@ -60,7 +60,11 @@ defmodule DmnSpike.Types do
 
   # --- lookup -----------------------------------------------------------------
 
-  def find(%Model{types: types}, name), do: Enum.find(types, &(&1.name == name))
+  # A top-level type being renamed to a name that is not acceptable yet (empty, or taken) keeps the name its
+  # references use in `:committed`; lookups go by that name until a valid one is typed.
+  defp effective(t), do: Map.get(t, :committed, t.name)
+
+  def find(%Model{types: types}, name), do: Enum.find(types, &(effective(&1) == name))
 
   # --- validation ---------------------------------------------------------------
 
@@ -215,8 +219,18 @@ defmodule DmnSpike.Types do
 
   @doc "Where the top-level type `name` is used: `%{nodes: [names], types: [\"Type\" or \"Type.field\"]}`."
   def usages(%Model{} = m, name) do
+    name = ((t = Enum.find(m.types, &(&1.name == name))) && effective(t)) || name
     nodes = for {_, n} <- m.nodes, n.type_ref == name, do: n.name
-    %{nodes: Enum.sort(nodes), types: for(t <- m.types, label <- refs_in(t, t.name, name), do: label)}
+
+    # a decision table's columns have a type too
+    columns =
+      for {_, %{expr: %{kind: :table} = e} = n} <- m.nodes,
+          {label, cols} <- [{"input", e.inputs}, {"output", e.outputs}],
+          {c, i} <- Enum.with_index(cols, 1),
+          Map.get(c, :type_ref) == name,
+          do: "#{n.name} (#{label} column #{i})"
+
+    %{nodes: Enum.sort(nodes ++ columns), types: for(t <- m.types, label <- refs_in(t, t.name, name), do: label)}
   end
 
   defp refs_in(t, label, name) do
@@ -242,21 +256,46 @@ defmodule DmnSpike.Types do
   def add_child(types, path, child),
     do: update(types, path, fn t -> %{t | ref: nil, components: t.components ++ [child]} end)
 
-  @doc "Renames the top-level type at index `i` and every reference to it."
+  @doc """
+  Renames the top-level type at index `i`. References (nodes, table columns, other types) follow only once
+  the name is acceptable, so typing a name that is taken for a moment does not merge the references of two
+  types: until then the type keeps the name its references use (`:committed`).
+  """
   def rename_top(%Model{} = m, i, new) do
-    old = Enum.at(m.types, i).name
-    m = rename_refs(m, old, new)
-    %{m | types: List.update_at(m.types, i, &%{&1 | name: new})}
+    t = Enum.at(m.types, i)
+    from = effective(t)
+    others = List.delete_at(m.types, i)
+
+    if String.trim(new) == "" or Enum.any?(others, &(&1.name == new or effective(&1) == new)) do
+      %{m | types: List.replace_at(m.types, i, t |> Map.put(:name, new) |> Map.put(:committed, from))}
+    else
+      m = rename_refs(m, from, new)
+      %{m | types: List.update_at(m.types, i, &(&1 |> Map.put(:name, new) |> Map.delete(:committed)))}
+    end
   end
 
   @doc "Points every reference to `old` at `new` (the type definition itself is untouched)."
   def rename_refs(%Model{} = m, old, new) when old != new do
     types = rename_in(m.types, old, new)
-    nodes = Map.new(m.nodes, fn {id, n} -> {id, if(n.type_ref == old, do: %{n | type_ref: new}, else: n)} end)
+    nodes = Map.new(m.nodes, fn {id, n} -> {id, rename_node(n, old, new)} end)
     %{m | types: types, nodes: nodes}
   end
 
   def rename_refs(m, _, _), do: m
+
+  # a node's own type and the types of a decision table's columns
+  defp rename_node(n, old, new) do
+    n = if n.type_ref == old, do: %{n | type_ref: new}, else: n
+    swap = fn col -> if Map.get(col, :type_ref) == old, do: Map.put(col, :type_ref, new), else: col end
+
+    case n.expr do
+      %{kind: :table, inputs: ins, outputs: outs} = e ->
+        %{n | expr: %{e | inputs: Enum.map(ins, swap), outputs: Enum.map(outs, swap)}}
+
+      _ ->
+        n
+    end
+  end
 
   defp rename_in(types, old, new) do
     Enum.map(types, fn t ->
