@@ -72,17 +72,18 @@ defmodule DmnSpike.TypesPanel do
     Enum.any?(hay, &(is_binary(&1) and String.contains?(String.downcase(&1), q)))
   end
 
-  def tree(%Model{types: []}, _ui),
+  def tree(%Model{types: [], ext_types: []}, _ui),
     do: ~s|<p class="hint">No data types yet.</p>|
 
   def tree(%Model{} = m, ui) do
     rows = visible(m, ui)
     q = String.downcase(String.trim(ui.q))
+    imported = imported(m, ui, q)
 
     body =
-      if rows == [],
+      if rows == [] and imported == [],
         do: [~s|<p class="hint">Nothing matches “#{Fmt.esc(ui.q)}”.</p>|],
-        else: Enum.map(rows, &row(m, ui, &1, q))
+        else: Enum.map(rows, &row(m, ui, &1, q)) ++ imported
 
     IO.iodata_to_binary([
       ~s|<div class="thead" aria-hidden="true"><span>Name</span><span>Type</span><span>Constraint</span><span></span></div>|,
@@ -96,14 +97,7 @@ defmodule DmnSpike.TypesPanel do
     editing = ui.edit && elem(ui.edit, 0) == id && elem(ui.edit, 1)
     open? = open?(t, path, ui, q)
 
-    chev =
-      cond do
-        t.components == [] ->
-          ~s|<span class="tchev"></span>|
-
-        true ->
-          ~s|<span class="tchev" data-click="ttoggle:#{id}" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="#{if open?, do: "M2.5 4.5 6 8l3.5-3.5", else: "M4.5 2.5 8 6l-3.5 3.5"}"/></svg></span>|
-      end
+    chev = chev(t, "ttoggle:#{id}", open?)
 
     name =
       if editing == :name,
@@ -133,6 +127,60 @@ defmodule DmnSpike.TypesPanel do
     ])
   end
 
+  defp chev(%{components: []}, _click, _open?), do: ~s|<span class="tchev"></span>|
+
+  defp chev(_t, click, open?),
+    do:
+      ~s|<span class="tchev" data-click="#{click}" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="#{if open?, do: "M2.5 4.5 6 8l3.5-3.5", else: "M4.5 2.5 8 6l-3.5 3.5"}"/></svg></span>|
+
+  # The types of imported models: read-only rows below the types of the document. They start closed (`ui.iopen`
+  # holds the open ones: a model has dozens of fields); a search opens what matches.
+  defp imported(%Model{ext_types: []}, _ui, _q), do: []
+
+  defp imported(%Model{} = m, ui, q) do
+    rows = m.ext_types |> Enum.with_index() |> Enum.flat_map(fn {t, i} -> iwalk(t, "x#{i}", 0, ui, q) end)
+
+    if rows == [],
+      do: [],
+      else: [
+        ~s|<div class="timp">Imported <small>from the models this one imports; read-only</small></div>|
+        | Enum.map(rows, &irow(m, &1, q))
+      ]
+  end
+
+  defp iwalk(t, id, depth, ui, q) do
+    if q != "" and not included?(t, q) do
+      []
+    else
+      open? =
+        t.components != [] and
+          if(q != "",
+            do: Enum.any?(t.components, &included?(&1, q)),
+            else: MapSet.member?(Map.get(ui, :iopen, MapSet.new()), id)
+          )
+
+      kids =
+        if open?,
+          do:
+            t.components
+            |> Enum.with_index()
+            |> Enum.flat_map(fn {c, j} -> iwalk(c, id <> "-#{j}", depth + 1, ui, q) end),
+          else: []
+
+      [{id, depth, t, open?} | kids]
+    end
+  end
+
+  defp irow(m, {id, depth, t, open?}, q) do
+    IO.iodata_to_binary([
+      ~s|<div class="trow imp" role="treeitem" aria-level="#{depth + 1}" style="--d:#{depth}">|,
+      ~s|<span class="tcell-name">#{chev(t, "itoggle:#{id}", open?)}<span class="ticon #{icon_class(m, t)}" aria-hidden="true">#{icon(m, t)}</span>|,
+      ~s|<span class="tname#{if t.ref == nil, do: " struct"}">#{mark(t.name, q)}</span></span>|,
+      ~s|<span class="ttype#{if custom_ref?(m, t), do: " custom"}">#{type_label(t)}</span>|,
+      ~s|<span class="tcons" title="#{Fmt.esc(summary_title(t))}">#{summary(t)}</span><span class="tact"></span></div>|
+    ])
+  end
+
   defp mark(name, ""), do: Fmt.esc(name)
 
   defp mark(name, q) do
@@ -151,7 +199,8 @@ defmodule DmnSpike.TypesPanel do
 
   defp type_label(t), do: Fmt.esc(t.ref || "Structure") <> if(t.collection, do: ~s|<b class="coll">[]</b>|, else: "")
 
-  defp custom_ref?(m, t), do: t.ref not in [nil, ""] and t.ref not in Types.builtins() and Types.find(m, t.ref) != nil
+  defp custom_ref?(m, t),
+    do: Enum.any?(Types.ref_names(t.ref), &(&1 not in Types.builtins() and Types.find(m, &1) != nil))
 
   @doc false
   def summary(%{constraint: nil}), do: ~s|<span class="none">—</span>|
@@ -222,17 +271,9 @@ defmodule DmnSpike.TypesPanel do
     end
   end
 
-  @doc "Grouped options for a type reference: structure, built-in and the custom types (a top-level type cannot be its own base)."
+  @doc "Grouped options for a type reference: structure and the types (a top-level type cannot be its own base)."
   def type_options(%Model{} = m, t, depth) do
-    cur = t.ref || ""
-    opt = fn v, label -> ~s|<option value="#{Fmt.esc(v)}"#{if v == cur, do: " selected"}>#{Fmt.esc(label)}</option>| end
-    custom = for x <- m.types, x.name != t.name or depth > 0, do: x.name
-
-    IO.iodata_to_binary([
-      opt.("", "Structure"),
-      ~s|<optgroup label="Built-in">#{Enum.map(Types.builtins(), &opt.(&1, &1))}</optgroup>|,
-      if(custom == [], do: "", else: ~s|<optgroup label="Custom">#{Enum.map(custom, &opt.(&1, &1))}</optgroup>|)
-    ])
+    DmnSpike.Panel.type_options(m, t.ref, first: {"", "Structure"}, hide: if(depth == 0, do: [t.name], else: []))
   end
 
   defp used_by(m, t) do

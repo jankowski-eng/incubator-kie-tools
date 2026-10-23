@@ -69,16 +69,11 @@ defmodule DmnSpike.Types do
 
   @doc """
   The types of the model imported as `import_name`, named the way a document that imports it refers to them
-  (`import_name.Type`). A `!` (not null) is dropped: the editor does not model nullability.
+  (`import_name.Type`), and their references with them (`lohn.Status!`, `list<lohn.Status>`).
   """
   def external(import_name, types) do
-    prefix = fn
-      ref when ref in [nil, ""] ->
-        ref
-
-      ref ->
-        ref = String.trim_trailing(ref, "!")
-        if ref in @builtins, do: ref, else: import_name <> "." <> ref
+    prefix = fn ref ->
+      map_ref(ref, fn name -> if name in @builtins, do: name, else: import_name <> "." <> name end)
     end
 
     walk = fn walk, t ->
@@ -88,21 +83,112 @@ defmodule DmnSpike.Types do
     for t <- types, do: %{walk.(walk, t) | name: import_name <> "." <> t.name}
   end
 
-  # --- validation ---------------------------------------------------------------
+  # --- type references ------------------------------------------------------------------
 
-  @doc "Errors (strings) for `value` against the type named `ref`; [] when it conforms."
-  def validate(_m, nil, _ref), do: []
-  def validate(_m, _value, ref) when ref in [nil, "", "<Undefined>", "Any"], do: []
+  @doc """
+  A type reference as FEEL writes a type: a name (`number`, `tApplicant`), `list<reference>`, and a trailing `!`
+  for "not null" on either (`number!`, `list<string!>!`). `{:ok, {:type, name, not_null?}}`,
+  `{:ok, {:list, inner, not_null?}}`, or `:error`.
+  """
+  def parse_ref(ref) when is_binary(ref) do
+    ref = String.trim(ref)
+    {body, not_null} = if String.ends_with?(ref, "!"), do: {String.slice(ref, 0..-2//1), true}, else: {ref, false}
+    body = String.trim(body)
 
-  def validate(%Model{} = m, value, ref) do
     cond do
-      ref in @builtins -> check_builtin(ref, value)
-      t = find(m, ref) -> check(m, value, t, [t.name])
-      true -> ["unknown type #{ref}"]
+      body == "" ->
+        :error
+
+      String.starts_with?(body, "list<") and String.ends_with?(body, ">") ->
+        with {:ok, inner} <- body |> String.slice(5..-2//1) |> parse_ref(), do: {:ok, {:list, inner, not_null}}
+
+      true ->
+        {:ok, {:type, body, not_null}}
     end
   end
 
-  defp check(_m, nil, _t, _seen), do: []
+  def parse_ref(_), do: :error
+
+  defp format_ref({:type, name, not_null}), do: name <> if(not_null, do: "!", else: "")
+  defp format_ref({:list, inner, not_null}), do: "list<" <> format_ref(inner) <> ">" <> if(not_null, do: "!", else: "")
+
+  @doc "The type names a reference mentions (`list<Foo!>!` mentions `Foo`)."
+  def ref_names(ref) do
+    case parse_ref(ref) do
+      {:ok, ast} -> ast_names(ast)
+      :error -> []
+    end
+  end
+
+  defp ast_names({:type, name, _}), do: [name]
+  defp ast_names({:list, inner, _}), do: ast_names(inner)
+
+  @doc "Whether `ref` mentions the type `name`."
+  def refers?(ref, name), do: name in ref_names(ref)
+
+  # `ref` with every name it mentions replaced by `fun.(name)`; what is not a reference is returned as it is
+  defp map_ref(ref, _fun) when ref in [nil, ""], do: ref
+
+  defp map_ref(ref, fun) do
+    case parse_ref(ref) do
+      {:ok, ast} -> ast |> map_ast(fun) |> format_ref()
+      :error -> ref
+    end
+  end
+
+  defp map_ast({:type, name, nn}, fun), do: {:type, fun.(name), nn}
+  defp map_ast({:list, inner, nn}, fun), do: {:list, map_ast(inner, fun), nn}
+
+  @doc """
+  The references to choose from for a type or a node, as `[{group, [reference]}]`: the types, and the forms of
+  each: not null (`T!`) and lists (`list<T>`, `list<T!>!`). Any other form can be written in a file and is kept.
+  """
+  def choices(%Model{} = m, hide \\ []) do
+    custom = for t <- m.types ++ m.ext_types, t.name not in hide, do: t.name
+    names = @builtins ++ custom
+
+    [
+      {"Built-in", @builtins},
+      {"Custom", custom},
+      {"Not null", for(n <- names, n != "Any", do: n <> "!")},
+      {"List", Enum.flat_map(names, &["list<#{&1}>", "list<#{&1}!>!"])}
+    ]
+  end
+
+  # --- validation ---------------------------------------------------------------
+
+  @doc "Errors (strings) for `value` against the type reference `ref`; [] when it conforms."
+  def validate(_m, _value, ref) when ref in [nil, "", "<Undefined>", "Any"], do: []
+  def validate(%Model{} = m, value, ref), do: check_ref(m, value, ref, [])
+
+  # a reference: a name that is built in or a type of the model, or a list of them, each possibly not null
+  defp check_ref(m, value, ref, seen) do
+    case parse_ref(ref) do
+      {:ok, ast} -> check_ast(m, value, ast, seen)
+      :error -> ["invalid type #{ref}"]
+    end
+  end
+
+  defp check_ast(_m, nil, {_, _, true}, _seen), do: ["must not be null"]
+  defp check_ast(_m, nil, _ast, _seen), do: []
+
+  defp check_ast(m, value, {:list, inner, _}, seen) when is_list(value),
+    do: Enum.flat_map(value, &check_ast(m, &1, inner, seen))
+
+  defp check_ast(_m, _value, {:list, _, _}, _seen), do: ["expected a list"]
+
+  defp check_ast(m, value, {:type, name, _}, seen) do
+    cond do
+      name in @builtins -> check_builtin(name, value)
+      name in seen -> ["type #{name} refers to itself"]
+      t = find(m, name) -> check(m, value, t, [name | seen])
+      true -> ["unknown type #{name}"]
+    end
+  end
+
+  # null is fine unless the type says `!`
+  defp check(_m, nil, t, _seen),
+    do: if(match?({:ok, {_, _, true}}, parse_ref(t.ref)), do: ["must not be null"], else: [])
 
   # An expression constraint on a list constrains the whole list (as `typeConstraint` does in KIE's editor);
   # an enumeration or range is checked against every item.
@@ -124,10 +210,7 @@ defmodule DmnSpike.Types do
     base =
       cond do
         t.ref == nil -> check_struct(m, value, t, seen)
-        t.ref in @builtins -> check_builtin(t.ref, value)
-        t.ref in seen -> ["type #{t.ref} refers to itself"]
-        other = find(m, t.ref) -> check(m, value, other, [t.ref | seen])
-        true -> ["unknown type #{t.ref}"]
+        true -> check_ref(m, value, t.ref, seen)
       end
 
     if base == [], do: check_constraint(t.constraint, value), else: base
@@ -222,8 +305,18 @@ defmodule DmnSpike.Types do
   @doc "Why the type reference of `t` does not resolve, or nil."
   def ref_error(_m, %{ref: ref}) when ref in [nil, ""], do: nil
 
-  def ref_error(%Model{} = m, %{ref: ref}),
-    do: if(ref in @builtins or find(m, ref), do: nil, else: "Unknown type \"#{ref}\"")
+  def ref_error(%Model{} = m, %{ref: ref}) do
+    case parse_ref(ref) do
+      :error ->
+        "Invalid type \"#{ref}\""
+
+      {:ok, ast} ->
+        case Enum.find(ast_names(ast), &(&1 not in @builtins and find(m, &1) == nil)) do
+          nil -> nil
+          name -> "Unknown type \"#{name}\""
+        end
+    end
+  end
 
   @doc "Every problem to show for the item at `path`."
   def errors(%Model{} = m, path) do
@@ -234,10 +327,21 @@ defmodule DmnSpike.Types do
 
   @doc "The built-in type a type resolves to (following references), or nil for a structure."
   def base(%Model{} = m, %{ref: ref}, depth \\ 0) do
+    with false <- depth > 10 or ref in [nil, ""],
+         {:ok, ast} <- parse_ref(ref) do
+      base_of(m, ast, depth)
+    else
+      _ -> nil
+    end
+  end
+
+  # a list is as its items are
+  defp base_of(m, {:list, inner, _}, depth), do: base_of(m, inner, depth)
+
+  defp base_of(m, {:type, name, _}, depth) do
     cond do
-      depth > 10 or ref in [nil, ""] -> nil
-      ref in @builtins -> ref
-      t = find(m, ref) -> base(m, t, depth + 1)
+      name in @builtins -> name
+      t = find(m, name) -> base(m, t, depth + 1)
       true -> nil
     end
   end
@@ -245,14 +349,14 @@ defmodule DmnSpike.Types do
   @doc "Where the top-level type `name` is used: `%{nodes: [names], types: [\"Type\" or \"Type.field\"]}`."
   def usages(%Model{} = m, name) do
     name = ((t = Enum.find(m.types, &(&1.name == name))) && effective(t)) || name
-    nodes = for {_, n} <- m.nodes, n.type_ref == name, do: n.name
+    nodes = for {_, n} <- m.nodes, refers?(n.type_ref, name), do: n.name
 
     # a decision table's columns have a type too
     columns =
       for {_, %{expr: %{kind: :table} = e} = n} <- m.nodes,
           {label, cols} <- [{"input", e.inputs}, {"output", e.outputs}],
           {c, i} <- Enum.with_index(cols, 1),
-          Map.get(c, :type_ref) == name,
+          refers?(Map.get(c, :type_ref), name),
           do: "#{n.name} (#{label} column #{i})"
 
     # references that only the original file holds (a business knowledge model's parameters, expressions that
@@ -261,7 +365,7 @@ defmodule DmnSpike.Types do
 
     retained =
       for {node, ref} <- DmnSpike.Dmn.Overlay.retained_type_refs(m),
-          ref == name,
+          refers?(ref, name),
           not MapSet.member?(shown, node),
           uniq: true,
           do: "#{node} (kept from the file)"
@@ -273,7 +377,7 @@ defmodule DmnSpike.Types do
   end
 
   defp refs_in(t, label, name) do
-    own = if t.ref == name and label != name, do: [label], else: []
+    own = if refers?(t.ref, name) and label != name, do: [label], else: []
     own ++ Enum.flat_map(t.components, &refs_in(&1, label <> "." <> &1.name, name))
   end
 
@@ -326,8 +430,8 @@ defmodule DmnSpike.Types do
 
   # a node's own type and the types of a decision table's columns
   defp rename_node(n, old, new) do
-    n = if n.type_ref == old, do: %{n | type_ref: new}, else: n
-    swap = fn col -> if Map.get(col, :type_ref) == old, do: Map.put(col, :type_ref, new), else: col end
+    n = %{n | type_ref: rename_ref(n.type_ref, old, new)}
+    swap = fn col -> Map.put(col, :type_ref, rename_ref(Map.get(col, :type_ref), old, new)) end
 
     case n.expr do
       %{kind: :table, inputs: ins, outputs: outs} = e ->
@@ -340,7 +444,11 @@ defmodule DmnSpike.Types do
 
   defp rename_in(types, old, new) do
     Enum.map(types, fn t ->
-      %{t | ref: if(t.ref == old, do: new, else: t.ref), components: rename_in(t.components, old, new)}
+      %{t | ref: rename_ref(t.ref, old, new), components: rename_in(t.components, old, new)}
     end)
   end
+
+  # `Foo!` and `list<Foo>` follow `Foo`; a reference that does not mention it is left as it is
+  defp rename_ref(ref, old, new),
+    do: if(refers?(ref, old), do: map_ref(ref, &if(&1 == old, do: new, else: &1)), else: ref)
 end

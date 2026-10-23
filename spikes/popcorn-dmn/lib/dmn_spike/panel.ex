@@ -231,11 +231,27 @@ defmodule DmnSpike.Panel do
     do:
       ~s|<select class="coltype" data-op="dttype" data-id="#{id}" data-path="#{path}" title="Type">#{type_options(m, current)}</select>|
 
-  def type_options(%Model{} = m, current) do
-    for t <- [""] ++ DmnSpike.Types.builtins() ++ Enum.map(m.types ++ m.ext_types, & &1.name), into: "" do
-      sel = if t == (current || ""), do: " selected", else: ""
-      ~s|<option value="#{Fmt.esc(t)}"#{sel}>#{if t == "", do: "&lt;Undefined&gt;", else: Fmt.esc(t)}</option>|
-    end
+  @doc """
+  The options of a type reference select: the types and their `T!` and `list<T>` forms, grouped. A reference that
+  is not among them (a type that does not exist, or a form written in a file) stays selectable, as the file has it.
+  Options: `:first` the `{value, label}` of the empty choice, `:hide` the names that cannot be chosen.
+  """
+  def type_options(%Model{} = m, current, opts \\ []) do
+    {empty, label} = Keyword.get(opts, :first, {"", "<Undefined>"})
+    cur = current || ""
+    groups = DmnSpike.Types.choices(m, Keyword.get(opts, :hide, []))
+    listed = [empty | Enum.flat_map(groups, &elem(&1, 1))]
+    opt = fn v, text -> ~s|<option value="#{Fmt.esc(v)}"#{if v == cur, do: " selected"}>#{Fmt.esc(text)}</option>| end
+
+    IO.iodata_to_binary([
+      opt.(empty, label),
+      if(cur in listed, do: "", else: opt.(cur, cur)),
+      for(
+        {group, refs} <- groups,
+        refs != [],
+        do: ~s|<optgroup label="#{group}">#{Enum.map(refs, &opt.(&1, &1))}</optgroup>|
+      )
+    ])
   end
 
   defp dt_ed(id, path, text, errs) do

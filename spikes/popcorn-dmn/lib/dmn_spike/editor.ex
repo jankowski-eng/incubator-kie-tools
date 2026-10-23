@@ -378,6 +378,8 @@ defmodule DmnSpike.Editor do
       tinsp: :auto,
       tedit: nil,
       tadv: MapSet.new(),
+      # the imported types that are open in the Data types tab (they start closed)
+      iopen: MapSet.new(),
       # XML inspector: open?, the document and its ranges as last shown, a refresh is pending, build time (ms), scroll on next refresh
       xopen: false,
       xml: nil,
@@ -892,6 +894,13 @@ defmodule DmnSpike.Editor do
     state
   end
 
+  defp event(%{"t" => "click", "what" => "itoggle:" <> p}, state) do
+    open = if MapSet.member?(state.iopen, p), do: MapSet.delete(state.iopen, p), else: MapSet.put(state.iopen, p)
+    state = %{state | iopen: open}
+    patch([["html", "#ttree", TypesPanel.tree(state.model, tui(state))]])
+    state
+  end
+
   defp event(%{"t" => "click", "what" => "ttype:" <> p}, %{tsel: p, tedit: nil} = state),
     do: start_edit(state, p, :type)
 
@@ -1333,6 +1342,7 @@ defmodule DmnSpike.Editor do
     %{
       sel: sel,
       closed: state.tclosed,
+      iopen: state.iopen,
       q: state.tq,
       insp: state.tinsp == true or (state.tinsp == :auto and sel != nil),
       edit: state.tedit && {state.tedit.path, state.tedit.field},

@@ -2244,7 +2244,7 @@ defmodule DmnSpikeTest do
       ext = external()
       assert Enum.map(ext, & &1.name) == ["lohn.Status", "lohn.Employee"]
       employee = Enum.find(ext, &(&1.name == "lohn.Employee"))
-      assert Enum.map(employee.components, &{&1.name, &1.ref}) == [{"name", "string"}, {"status", "lohn.Status"}]
+      assert Enum.map(employee.components, &{&1.name, &1.ref}) == [{"name", "string!"}, {"status", "lohn.Status"}]
     end
 
     test "a type of the import resolves and checks values; an unknown one does not" do
@@ -2269,6 +2269,147 @@ defmodule DmnSpikeTest do
       refute out =~ "<itemDefinition"
       # they are not part of what is saved, so loading them does not make the document unsaved
       assert Model.dmn_part(m) == Model.dmn_part(%{m | ext_types: []})
+    end
+  end
+
+  describe "type references: number!, string!, list<string!>!" do
+    alias DmnSpike.{Dmn, Panel, Types, TypesPanel}
+
+    defp ui(extra \\ %{}),
+      do:
+        Map.merge(
+          %{sel: nil, closed: MapSet.new(), iopen: MapSet.new(), q: "", insp: false, edit: nil, adv: MapSet.new()},
+          extra
+        )
+
+    test "they are read as a name or a list, each possibly not null" do
+      assert Types.parse_ref("number") == {:ok, {:type, "number", false}}
+      assert Types.parse_ref("number!") == {:ok, {:type, "number", true}}
+      assert Types.parse_ref("date and time!") == {:ok, {:type, "date and time", true}}
+      assert Types.parse_ref("list<string!>!") == {:ok, {:list, {:type, "string", true}, true}}
+      assert Types.parse_ref("list<list<number>>") == {:ok, {:list, {:list, {:type, "number", false}, false}, false}}
+      assert Types.parse_ref("list<string") == {:ok, {:type, "list<string", false}}
+      assert Types.parse_ref("!") == :error
+      assert Types.parse_ref("list<>") == :error
+      assert Types.ref_names("list<Foo!>!") == ["Foo"]
+    end
+
+    test "they resolve against the built-in and the defined types, and say what is unknown" do
+      m = Model.sample()
+
+      for ok <- ["number!", "string!", "list<string!>!", "list<tRatio>", "tRatio!", "list<tRatio!>!"],
+          do: assert(Types.ref_error(m, %{ref: ok}) == nil, ok)
+
+      assert Types.ref_error(m, %{ref: "list<Nope!>!"}) == ~s|Unknown type "Nope"|
+      assert Types.ref_error(m, %{ref: "list<>"}) =~ "Invalid type"
+    end
+
+    test "not null rejects null, a list checks its items" do
+      m = Model.sample()
+      d = &Decimal.new/1
+
+      assert Types.validate(m, nil, "number") == []
+      assert Types.validate(m, nil, "number!") == ["must not be null"]
+      assert Types.validate(m, d.(1), "number!") == []
+      assert Types.validate(m, "x", "number!") == ["expected a number"]
+
+      assert Types.validate(m, ["a", "b"], "list<string!>!") == []
+      assert Types.validate(m, ["a", nil], "list<string!>!") == ["must not be null"]
+      assert Types.validate(m, ["a", nil], "list<string>") == []
+      assert Types.validate(m, nil, "list<string!>!") == ["must not be null"]
+      assert Types.validate(m, nil, "list<string>") == []
+      assert Types.validate(m, "a", "list<string>") == ["expected a list"]
+      assert [_ | _] = Types.validate(m, [d.(1)], "list<string!>!")
+      # named types inside a list
+      assert Types.validate(m, [d.(5), d.(500)], "list<tRatio>") == ["violates constraint [0..100]"]
+      assert Types.validate(m, [d.(5)], "list<tRatio!>!") == []
+    end
+
+    test "a component of a data type can have them, and the base type is the item's" do
+      t = %{
+        name: "tPerson",
+        ref: nil,
+        collection: false,
+        constraint: nil,
+        components: [
+          %{name: "tags", ref: "list<string!>!", collection: false, constraint: nil, components: []},
+          %{name: "age", ref: "number!", collection: false, constraint: nil, components: []}
+        ]
+      }
+
+      m = %{Model.sample() | types: [t]}
+
+      assert Types.validate(m, %{"tags" => ["a"], "age" => Decimal.new(3)}, "tPerson") == []
+      assert Types.validate(m, %{"tags" => ["a"], "age" => nil}, "tPerson") == ["age: must not be null"]
+      assert Types.base(m, hd(t.components)) == "string"
+      assert Types.base(m, List.last(t.components)) == "number"
+    end
+
+    test "they are written to the file and read back as they are" do
+      xml =
+        ~s|<definitions xmlns="https://www.omg.org/spec/DMN/20230324/MODEL/" namespace="n" id="d" name="R">| <>
+          ~s|<itemDefinition id="t" name="tPerson"><itemComponent id="c" name="tags" isCollection="false"><typeRef>list&lt;string!&gt;!</typeRef></itemComponent></itemDefinition>| <>
+          ~s|<inputData id="in" name="x"><variable id="v" name="x" typeRef="list&lt;number!&gt;!"/></inputData></definitions>|
+
+      {:ok, m, _} = Dmn.from_xml(xml)
+      assert hd(hd(m.types).components).ref == "list<string!>!"
+      assert m.nodes["in"].type_ref == "list<number!>!"
+      # an edit forces the elements to be written again
+      out = m |> Model.rename("in", "y") |> Dmn.to_xml()
+      assert {:ok, again, _} = Dmn.from_xml(out)
+      assert hd(hd(again.types).components).ref == "list<string!>!"
+      assert again.nodes["in"].type_ref == "list<number!>!"
+    end
+
+    test "the selects offer them, and keep one that is not among the choices" do
+      m = Model.sample()
+      html = Panel.type_options(m, "list<tRatio!>!")
+      assert html =~ ~s|<optgroup label="Not null">|
+      assert html =~ ~s|value="string!"|
+      assert html =~ ~s|value="list&lt;string!&gt;!"|
+      assert html =~ ~s|value="list&lt;tRatio!&gt;!" selected|
+      # a form the choices do not have is kept, not shown as undefined
+      assert Panel.type_options(m, "list<list<number>>") =~ ~s|value="list&lt;list&lt;number&gt;&gt;" selected|
+    end
+
+    test "a type is used by the nodes that mention it as Foo!, list<Foo>, and renamed with them" do
+      m = Model.sample()
+      m = Model.set_type_ref(m, "loan", "list<tVerdict!>!")
+      assert "Loan Pre-Qualification" in Types.usages(m, "tVerdict").nodes
+
+      renamed = Types.rename_refs(m, "tVerdict", "tOutcome")
+      assert renamed.nodes["loan"].type_ref == "list<tOutcome!>!"
+      # a reference that does not mention it is not touched
+      assert Types.rename_refs(m, "zzz", "yyy").nodes["loan"].type_ref == "list<tVerdict!>!"
+    end
+
+    test "imported types are listed read-only in the Data types tab" do
+      {:ok, imported, _} =
+        Dmn.from_xml(
+          ~s|<definitions xmlns="https://www.omg.org/spec/DMN/20230324/MODEL/" namespace="u" id="i" name="T">| <>
+            ~s|<itemDefinition id="E" name="Employee"><itemComponent id="E.n" name="first_name" isCollection="false"><typeRef>string!</typeRef></itemComponent>| <>
+            ~s|<itemComponent id="E.t" name="tags" isCollection="false"><typeRef>list&lt;string!&gt;!</typeRef></itemComponent></itemDefinition></definitions>|
+        )
+
+      m = %{Model.sample() | ext_types: Types.external("lohn", imported.types)}
+      html = TypesPanel.tree(m, ui())
+
+      # the row is there, closed, with no selection or edit on it, and it can be opened
+      assert html =~ "lohn.Employee"
+      assert html =~ ~s|data-click="itoggle:x0"|
+      refute html =~ "tsel:x"
+      refute html =~ "first_name"
+
+      open = TypesPanel.tree(m, ui(%{iopen: MapSet.new(["x0"])}))
+      assert open =~ "first_name"
+      assert open =~ "list&lt;string!&gt;!"
+      refute open =~ "ttype:x"
+
+      # a search opens what matches
+      assert TypesPanel.tree(m, ui(%{q: "first_name"})) =~ "first_name"
+      assert TypesPanel.tree(m, ui(%{q: "nothing like this"})) =~ "Nothing matches"
+      # a document with no types of its own still shows them
+      assert TypesPanel.tree(%{m | types: []}, ui()) =~ "lohn.Employee"
     end
   end
 end
