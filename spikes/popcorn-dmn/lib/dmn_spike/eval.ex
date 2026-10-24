@@ -145,6 +145,8 @@ defmodule DmnSpike.Eval do
   end
 
   defp context_only?(%{expr: %{rows: [_ | _], result: result}}), do: String.trim(result) == ""
+  # an imported `<context/>`: no entries, no result, and an empty context as the value
+  defp context_only?(%{expr: %{rows: [], context: true, result: result}}), do: String.trim(result) == ""
   defp context_only?(_), do: false
 
   # --- decision tables -------------------------------------------------------------
@@ -178,7 +180,16 @@ defmodule DmnSpike.Eval do
 
     names = Enum.map(t.outputs, & &1.name)
     matched = for {r, i} <- Enum.with_index(rules), r.matched, do: {i, rule_value(names, Enum.map(r.outs, &value_of/1))}
-    {value, message} = hit(t.hit_policy, matched)
+    # two output columns with one name would silently lose one of the values in the result
+    {value, message} =
+      case duplicate_names(names) do
+        [] ->
+          hit(t.hit_policy, matched)
+
+        dups ->
+          {nil, "output columns need different names, but #{Enum.map_join(dups, ", ", &name_label/1)} appears twice"}
+      end
+
     # the rules that make up the result: FIRST uses only the earliest match, the other policies every match
     chosen =
       if t.hit_policy == "FIRST",
@@ -213,6 +224,14 @@ defmodule DmnSpike.Eval do
   end
 
   defp typed(col), do: if(Map.get(col, :type_ref) not in [nil, ""], do: col.type_ref)
+
+  defp duplicate_names(names) when length(names) < 2, do: []
+
+  defp duplicate_names(names),
+    do: names |> Enum.frequencies() |> Enum.filter(fn {_, n} -> n > 1 end) |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+
+  defp name_label(""), do: "an empty name"
+  defp name_label(name), do: "\"#{name}\""
 
   # one output column gives its value, several give a context keyed by the output names
   defp rule_value(_names, [value]), do: value
@@ -260,6 +279,9 @@ defmodule DmnSpike.Eval do
   end
 
   # a context body becomes `{rows..., __result: result}.__result` so it can sit inside a function
+  defp body_text(%{expr: %{rows: [], context: true, result: result}} = n),
+    do: if(String.trim(result) == "", do: "{}", else: body_text(put_in(n.expr, Map.delete(n.expr, :context))))
+
   defp body_text(%{expr: %{rows: [], result: result}}), do: blank_null(result)
 
   defp body_text(%{expr: %{rows: rows, result: result}}) do

@@ -2171,6 +2171,84 @@ defmodule DmnSpikeTest do
     end
   end
 
+  describe "empty contexts, output names, the fold control" do
+    alias DmnSpike.{Dmn, Problems, XmlIndex, XmlView}
+
+    @ctx """
+    <definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="c" id="d">
+      <decision id="a" name="A"><variable id="va" name="A"/><context/></decision>
+      <decision id="b" name="B"><variable id="vb" name="B"/>
+        <informationRequirement id="r"><requiredDecision href="#a"/></informationRequirement>
+        <literalExpression><text>if A = {} then "empty context" else "something else"</text></literalExpression></decision>
+      <businessKnowledgeModel id="k" name="K"><variable id="vk" name="K"/><encapsulatedLogic id="el"><context/></encapsulatedLogic></businessKnowledgeModel>
+      <decision id="e" name="E"><variable id="ve" name="E"/><literalExpression/></decision>
+    </definitions>
+    """
+
+    test "an empty <context/> is an empty context, not null, and stays one in the file" do
+      {:ok, m, _} = Dmn.from_xml(@ctx)
+      r = Eval.run(m)
+      assert r["a"].value == %{}
+      assert r["b"].value == "empty context"
+      assert r["e"].value == nil, "an empty literal is still null"
+      assert {:ok, %{}, _} = Feel.eval("f()", %{"f" => r["k"].value}, sandbox: false)
+
+      out = Dmn.to_xml(m)
+      assert out =~ ~r/<decision id="a".*?<context\/>/s
+      # edited elsewhere, the element is written again: still an empty context
+      out = m |> Model.rename("a", "A2") |> Dmn.to_xml()
+      assert out =~ ~r/<decision id="a".*?<context\/>/s
+      {:ok, m2, _} = Dmn.from_xml(out)
+      assert Eval.run(m2)["a"].value == %{}
+
+      # no "has no expression yet" for something deliberately empty, but for the literal that is blank
+      found = Problems.list(m, r) |> Enum.map(&{&1.target, &1.message})
+      refute {{:node, "a"}, "has no expression yet"} in found
+      assert {{:node, "e"}, "has no expression yet"} in found
+
+      # writing a result makes it an ordinary expression
+      m3 = Model.set_text(m, "a", 0, "1")
+      assert Decimal.equal?(Eval.run(m3)["a"].value, 1)
+    end
+
+    test "new output columns get names nobody has: deleting one in the middle does not repeat a name" do
+      {m, id} = Model.add_node(Model.sample(), "decision", 0, 0)
+      m = Model.set_expr_kind(m, id, :table)
+      m = m |> Model.add_output(id) |> Model.add_output(id)
+      assert Enum.map(m.nodes[id].expr.outputs, & &1.name) == ["", "output 2", "output 3"]
+      m = m |> Model.del_output(id, 1) |> Model.add_output(id)
+      names = Enum.map(m.nodes[id].expr.outputs, & &1.name)
+      assert names == Enum.uniq(names), inspect(names)
+    end
+
+    test "two output columns with the same name are a table error, not a value that silently loses one" do
+      {m, id} = Model.add_node(Model.sample(), "decision", 0, 0)
+      m = m |> Model.set_expr_kind(id, :table) |> Model.add_output(id)
+      m = m |> Model.set_table_text(id, ["h", 0], "1") |> Model.set_table_text(id, ["e", 0, 0], "1")
+      m = m |> Model.set_table_text(id, ["n", 0], "x") |> Model.set_table_text(id, ["n", 1], "x")
+      m = m |> Model.set_table_text(id, ["o", 0, 0], "1") |> Model.set_table_text(id, ["o", 0, 1], "2")
+      r = Eval.run(m)[id]
+      assert r.value == nil
+      assert r.table.message =~ ~s|"x" appears twice|
+      assert Enum.any?(Problems.list(m, Eval.run(m)), &(&1.target == {:node, id} and &1.message =~ "different names"))
+
+      m = Model.set_table_text(m, id, ["n", 1], "y")
+      assert Eval.run(m)[id].value == %{"x" => Decimal.new(1), "y" => Decimal.new(2)}
+      # unnamed columns count as the same name
+      m = m |> Model.set_table_text(id, ["n", 0], "") |> Model.set_table_text(id, ["n", 1], "")
+      assert Eval.run(m)[id].table.message =~ "an empty name"
+    end
+
+    test "a fold control in the XML view is a button that names itself and says whether it is open" do
+      x = XmlIndex.build(Model.sample(), "Loan")
+      html = XmlView.html(x)
+      [btn] = html |> String.split("<button") |> Enum.drop(1) |> Enum.take(1)
+      assert btn =~ ~s|type="button"| and btn =~ ~s|class="xg"| and btn =~ ~s|aria-expanded="true"|
+      assert btn =~ ~r/aria-label="Fold lines \d+ to \d+"/
+      refute html =~ ~s|<span class="xg" data-to|
+    end
+  end
+
   describe "descriptions" do
     alias DmnSpike.Dmn
 

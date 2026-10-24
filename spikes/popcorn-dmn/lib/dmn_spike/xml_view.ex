@@ -33,7 +33,7 @@ defmodule DmnSpike.XmlView do
     gutter =
       if fold_to,
         do:
-          ~s|<span class="xg" data-to="#{fold_to}" title="Fold"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></span>|,
+          ~s|<button type="button" class="xg" data-to="#{fold_to}" aria-expanded="true" aria-label="Fold lines #{n} to #{fold_to}" title="Fold"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></button>|,
         else: ~s|<span class="xg"></span>|
 
     ~s|<div class="xl" data-n="#{n}"><span class="xn">#{n}</span>#{gutter}<span class="xc">#{highlight(text)}</span></div>|

@@ -1949,6 +1949,20 @@
       .xg[data-to] {
         cursor: pointer;
       }
+      /* the control is a real button (focusable, with a name and an expanded state): drop the button look */
+      button.xg {
+        height: auto;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 3px;
+        background: transparent;
+        box-shadow: none;
+      }
+      button.xg:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
       .xg[data-to]:hover {
         color: var(--text);
       }
@@ -2937,8 +2951,14 @@
             const to = folds.get(from);
             for (let n = from + 1; n <= to; n++) lines[n - 1].hidden = true;
           }
-          for (const g of code.querySelectorAll(".xg[data-to]"))
-            g.classList.toggle("folded", folded.has(+g.closest(".xl").dataset.n));
+          for (const g of code.querySelectorAll(".xg[data-to]")) {
+            const n = +g.closest(".xl").dataset.n,
+              closed = folded.has(n);
+            g.classList.toggle("folded", closed);
+            g.setAttribute("aria-expanded", String(!closed));
+            g.setAttribute("aria-label", `${closed ? "Unfold" : "Fold"} lines ${n} to ${g.dataset.to}`);
+            g.title = closed ? "Unfold" : "Fold";
+          }
         };
         code.addEventListener("click", (e) => {
           const g = e.target.closest(".xg[data-to]");
@@ -3176,7 +3196,8 @@
           });
           // Popcorn 0.4.0-next.9 traps when one JS->BEAM message is larger than 64 KiB: text goes in chunks
           const sendText = async (popcorn, kind, name, text) => {
-            const parts = [], size = 16 * 1024;
+            const parts = [],
+              size = 16 * 1024;
             for (let i = 0; i < text.length; ) {
               let end = Math.min(i + size, text.length);
               const c = text.charCodeAt(end - 1);

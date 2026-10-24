@@ -353,7 +353,16 @@ defmodule DmnSpike.Model do
 
   def insert_output(%__MODULE__{} = m, id, at) do
     update_in(m.nodes[id].expr, fn t ->
-      out = %{name: "output #{length(t.outputs) + 1}", type_ref: nil}
+      # a name no column has yet (the count alone repeats one after a column in the middle was deleted)
+      taken = MapSet.new(t.outputs, & &1.name)
+
+      name =
+        (length(t.outputs) + 1)
+        |> Stream.iterate(&(&1 + 1))
+        |> Stream.map(&"output #{&1}")
+        |> Enum.find(&(not MapSet.member?(taken, &1)))
+
+      out = %{name: name, type_ref: nil}
 
       %{
         t

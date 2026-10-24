@@ -104,9 +104,10 @@ defmodule DmnSpike.Problems do
   defp empty_problems(%{type: type, expr: expr} = node, mk) when type in [:decision, :bkm] do
     case Model.kind(node) do
       :context ->
-        if Enum.all?(Model.cells(node), fn {_, text} -> String.trim(text) == "" end),
-          do: [mk.(:warning, "has no expression yet")],
-          else: []
+        if not Map.get(expr, :context, false) and
+             Enum.all?(Model.cells(node), fn {_, text} -> String.trim(text) == "" end),
+           do: [mk.(:warning, "has no expression yet")],
+           else: []
 
       :table ->
         if expr.rules == [], do: [mk.(:warning, "the decision table has no rules")], else: []

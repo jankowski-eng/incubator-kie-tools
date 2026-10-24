@@ -238,7 +238,7 @@ defmodule DmnSpike.Dmn do
   end
 
   def expression_xml(%{kind: :raw}), do: []
-  def expression_xml(%{rows: [], result: ""}), do: []
+  def expression_xml(%{rows: [], result: ""} = e), do: if(Map.get(e, :context), do: [el("context", [], [])], else: [])
   def expression_xml(%{rows: [], result: text}), do: literal(text)
 
   def expression_xml(%{rows: rows, result: result}) do
@@ -755,7 +755,10 @@ defmodule DmnSpike.Dmn do
           end
 
         extra = Enum.flat_map(parsed, &elem(&1, 2))
-        {%{rows: Enum.map(named, fn {n, t, _} -> %{name: n, text: t} end), result: result}, notes ++ extra}
+        expr = %{rows: Enum.map(named, fn {n, t, _} -> %{name: n, text: t} end), result: result}
+        # a context with no entry at all is an empty context, which is not the same as an empty literal
+        expr = if parsed == [], do: Map.put(expr, :context, true), else: expr
+        {expr, notes ++ extra}
     end
   end
 
