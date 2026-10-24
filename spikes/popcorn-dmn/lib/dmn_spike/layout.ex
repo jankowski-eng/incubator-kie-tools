@@ -36,7 +36,11 @@ defmodule DmnSpike.Layout do
   defp layout(%Model{nodes: nodes} = m) when map_size(nodes) == 0, do: m
 
   defp layout(%Model{} = m) do
-    layer = layers(m)
+    # decisions that require each other (a cycle in an imported file) leave no layer 0: number the layers
+    # that exist 0, 1, 2, ... so that no row is missing
+    raw = layers(m)
+    rows = raw |> Map.values() |> Enum.uniq() |> Enum.sort() |> Enum.with_index() |> Map.new()
+    layer = Map.new(raw, fn {id, l} -> {id, rows[l]} end)
     by_layer = layer |> Enum.group_by(fn {_, l} -> l end, fn {id, _} -> id end)
     depth = by_layer |> Map.keys() |> Enum.max()
 
@@ -102,7 +106,8 @@ defmodule DmnSpike.Layout do
       ref_pos = acc |> Map.get(ref_layer, []) |> Enum.with_index() |> Map.new()
 
       ordered =
-        acc[l]
+        acc
+        |> Map.get(l, [])
         |> Enum.with_index()
         |> Enum.sort_by(fn {id, i} ->
           neigh =

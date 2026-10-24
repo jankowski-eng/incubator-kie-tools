@@ -13,6 +13,17 @@ defmodule DmnSpike.RoundtripFuzzTest do
   @steps 14
   @schema Path.expand("../../../packages/dmn-marshaller/src/schemas/dmn-1_6/DMN16.xsd", __DIR__)
 
+  # Without xmllint the random-edit cases would pass without any schema check, looking the same as a real
+  # pass: so its absence fails here, loudly, unless skipping is asked for (DMN_SKIP_SCHEMA=1).
+  test "xmllint is installed, so the random-edit documents really are validated against DMN16.xsd" do
+    if System.get_env("DMN_SKIP_SCHEMA") == "1" do
+      IO.puts(:stderr, "\nDMN_SKIP_SCHEMA=1: the random-edit documents are NOT validated against DMN16.xsd")
+    else
+      assert System.find_executable("xmllint"),
+             "xmllint is not installed: install libxml2 (it ships with macOS) or run with DMN_SKIP_SCHEMA=1 to skip the schema check"
+    end
+  end
+
   for file <- @files, seed <- @seeds do
     test "random edits on #{inspect(file)} (seed #{seed}) give a consistent file" do
       :rand.seed(:exsss, {unquote(seed), 42, 7})
@@ -242,7 +253,7 @@ defmodule DmnSpike.RoundtripFuzzTest do
   # Documents in DMN 1.6's namespace are validated against the repository's own DMN16.xsd with xmllint
   # (a file in another namespace, such as the real Sample.dmn, cannot be validated against it).
   defp check_schema!(xml, context) do
-    if xmllint = System.find_executable("xmllint") do
+    if xmllint = schema_validator() do
       if xml =~ "spec/DMN/20240513/MODEL" do
         file = Path.join(System.tmp_dir!(), "fuzz-#{System.unique_integer([:positive])}.dmn")
         File.write!(file, xml)
@@ -253,14 +264,33 @@ defmodule DmnSpike.RoundtripFuzzTest do
     end
   end
 
+  # xmllint, unless validation was switched off on purpose with DMN_SKIP_SCHEMA=1
+  defp schema_validator, do: if(System.get_env("DMN_SKIP_SCHEMA") != "1", do: System.find_executable("xmllint"))
+
   defp collect({_, _, kids} = e), do: [e | Enum.flat_map(Enum.filter(kids, &is_tuple/1), &collect/1)]
 
   defp check_roundtrip!(m, xml, context) do
     assert {:ok, m2, _} = Dmn.from_xml(xml), context
 
+    # Everything the edits touch, as the model holds it: expressions, table contents, positions, type
+    # definitions. Left out on purpose: bookkeeping from the import (a type's origin and committed name) and
+    # the values of inputs, which are test data (scenarios) and not part of the file.
     essence = fn m ->
-      {for({id, n} <- m.nodes, do: {id, n.type, n.name, Model.description(n), n.type_ref}) |> Enum.sort(),
-       Enum.sort(m.edges), Enum.sort(m.links), m.types |> Enum.map(& &1.name) |> Enum.sort()}
+      nodes =
+        for {id, n} <- m.nodes do
+          # (a business knowledge model without parameters is one with an empty list: the same thing)
+          expr =
+            case n do
+              %{type: :input} -> nil
+              %{type: :bkm} -> Map.put_new(n.expr, :params, [])
+              _ -> n.expr
+            end
+
+          {id, n.type, n.name, Model.description(n), n.type_ref, expr, {n.x, n.y, n.w, n.h}}
+        end
+
+      types = for t <- m.types, do: Map.drop(t, [:origin, :committed])
+      {Enum.sort(nodes), Enum.sort(m.edges), Enum.sort(m.links), types}
     end
 
     {n1, e1, l1, t1} = essence.(m)

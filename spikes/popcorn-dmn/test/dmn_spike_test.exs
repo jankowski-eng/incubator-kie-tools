@@ -2004,6 +2004,92 @@ defmodule DmnSpikeTest do
     end
   end
 
+  describe "review round six (layout cycles, column types, outlines)" do
+    alias DmnSpike.{Dmn, Layout, Problems, Svg}
+
+    test "decisions that require each other can be laid out" do
+      xml =
+        ~s|<definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="c" id="d"><decision id="a" name="A"><variable id="va" name="A"/><informationRequirement id="r1"><requiredDecision href="#b"/></informationRequirement><literalExpression><text>1</text></literalExpression></decision><decision id="b" name="B"><variable id="vb" name="B"/><informationRequirement id="r2"><requiredDecision href="#a"/></informationRequirement><literalExpression><text>1</text></literalExpression></decision></definitions>|
+
+      {:ok, m, _} = Dmn.from_xml(xml)
+      laid = Layout.run(m)
+      assert map_size(laid.nodes) == 2
+      assert laid.nodes["a"].y != laid.nodes["b"].y, "in two rows, none missing"
+    end
+
+    test "a decision table's column types are checked against the values" do
+      m = Model.sample()
+      # the risk table's output column is a tCategory (one of three words), the node itself has no type
+      m = Model.set_type_ref(m, "risk", nil)
+      assert Eval.run(m)["risk"].errors == []
+
+      # (the sample's inputs match rule 2, the second one)
+      m = Model.set_table_text(m, "risk", ["o", 1, 0], ~s|"Unknown"|)
+      errors = Eval.run(m)["risk"].errors
+      assert Enum.any?(errors, &(&1 =~ "output column 1" and &1 =~ "constraint")), inspect(errors)
+
+      assert [%{severity: :error, message: msg}] =
+               Problems.list(m, Eval.run(m)) |> Enum.filter(&(&1.target == {:node, "risk"}))
+
+      assert msg =~ "does not fit its type"
+
+      # an input column typed tRatio gets a value that is not a ratio
+      m = Model.set_table_text(Model.sample(), "risk", ["h", 0], "500")
+      assert Enum.any?(Eval.run(m)["risk"].errors, &(&1 =~ "input column 1"))
+    end
+
+    test "only the outputs of the rules that make up the result are checked" do
+      m = Model.sample()
+      # rule 1 (not chosen: FIRST takes the earliest match) has an output that would break the type
+      m = Model.set_table_text(m, "risk", ["o", 2, 0], ~s|"Unknown"|)
+      assert Eval.run(m)["risk"].errors == []
+    end
+
+    defp on_capsule?(n, {x, y}) do
+      r = n.h / 2
+      {cx, cy} = Svg.center(n)
+      a = n.w / 2 - r
+      dx = max(abs(x - cx) - a, 0)
+      abs(:math.sqrt(dx * dx + (y - cy) * (y - cy)) - r) < 0.2
+    end
+
+    test "edges meet a capsule where the capsule is, also in the round ends" do
+      n = %{type: :input, x: 0, y: 0, w: 150, h: 60}
+      # the case from the review: a ray towards (225, -30) used to leave at (150, 0), outside the outline
+      {x, y} = Svg.border(n, {225, -30})
+      assert on_capsule?(n, {x, y}), "#{x}, #{y}"
+      refute {x, y} == {150.0, 0.0}
+
+      for target <- [{75, -100}, {400, 30}, {400, 200}, {-200, -90}, {75, 300}, {-50, 30}] do
+        assert on_capsule?(n, Svg.border(n, target)), inspect(target)
+      end
+    end
+
+    test "edges meet a business knowledge model on its cut corners" do
+      n = %{type: :bkm, x: 0, y: 0, w: 150, h: 60}
+      # towards a corner: the cut is crossed, on the line x + y = 14 (top left) and (150 - x) + (60 - y) = 14
+      {x, y} = Svg.border(n, {0, 0})
+      assert_in_delta x + y, 14.0, 0.2, "top left: #{x}, #{y}"
+      {x, y} = Svg.border(n, {150, 60})
+      assert_in_delta 150 - x + (60 - y), 14.0, 0.2, "bottom right: #{x}, #{y}"
+      # the other two corners are not cut
+      assert Svg.border(n, {150, 0}) == {150.0, 0.0}
+      assert Svg.border(n, {0, 60}) == {0.0, 60.0}
+      # straight up and sideways still meet the plain edges
+      assert Svg.border(n, {75, -100}) == {75.0, 0.0}
+      assert Svg.border(n, {400, 30}) == {150.0, 30.0}
+    end
+
+    test "a new table where an old one was does not inherit its columns' types" do
+      xml =
+        ~s|<definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="c" id="d"><decision id="a" name="A"><variable id="va" name="A"/><decisionTable id="dt" hitPolicy="FIRST"><input id="i"><inputExpression id="ie" typeRef="number"><text>1</text></inputExpression></input><output id="o" typeRef="string"/><rule id="r"><inputEntry id="e"><text>-</text></inputEntry><outputEntry id="oe"><text>"x"</text></outputEntry></rule></decisionTable></decision></definitions>|
+
+      {:ok, m, _} = Dmn.from_xml(xml)
+      out = m |> Model.set_expr_kind("a", :context) |> Model.set_expr_kind("a", :table) |> Dmn.to_xml()
+      refute out =~ "typeRef"
+    end
+  end
+
   describe "descriptions" do
     alias DmnSpike.Dmn
 

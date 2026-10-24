@@ -643,13 +643,16 @@ defmodule DmnSpike.Dmn.Overlay do
   end
 
   # attributes the model owns: when the regenerated element has none, the original's is gone on purpose
+  # (a column's typeRef is modelled now: a new table that merely sits where an old one was must not inherit it)
   @owned ~w(name hitPolicy)
+  @owned_by_tag %{"inputExpression" => ~w(typeRef), "output" => ~w(name typeRef)}
 
   # Merges a regenerated element into the original it replaces, by tag and position. Only where the number
   # of children with a tag is unchanged (a deleted column or rule would shift the positions and attach
   # another one's ids and typeRef), otherwise the regenerated children are used as they are.
   defp merge({:el, tag, fattrs, fkids}, {_, rattrs, rkids}) do
-    kept = Enum.reject(rattrs, fn {k, _} -> Dmn.local(k) in @owned and not List.keymember?(fattrs, k, 0) end)
+    owned = Map.get(@owned_by_tag, Dmn.local(tag), @owned)
+    kept = Enum.reject(rattrs, fn {k, _} -> Dmn.local(k) in owned and not List.keymember?(fattrs, k, 0) end)
     attrs = Enum.reduce(fattrs, kept, &put_attrs(&2, [&1]))
     {:el, tag, attrs, merge_children(Dmn.local(tag), fkids, for(k <- rkids, is_tuple(k), do: k))}
   end

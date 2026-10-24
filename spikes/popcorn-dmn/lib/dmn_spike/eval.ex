@@ -1,7 +1,7 @@
 defmodule DmnSpike.Eval do
   @moduledoc "Evaluates every node of a model with `feel`, in requirement order."
 
-  alias DmnSpike.Model
+  alias DmnSpike.{Model, Types}
 
   @doc "Returns `%{node_id => %{value: term, cells: [result]}}`."
   def run(%Model{} = m) do
@@ -23,24 +23,26 @@ defmodule DmnSpike.Eval do
         env =
           for d <- deps, Map.has_key?(acc, d), into: %{}, do: {m.nodes[d].name, acc[d].value}
 
-        node_result = eval_node(m.nodes[id], env)
+        node_result = eval_node(m.nodes[id], env, m)
         # a business knowledge model's value is a function; its type is the return type
         errors =
           if m.nodes[id].type == :bkm, do: [], else: DmnSpike.Types.validate(m, node_result.value, m.nodes[id].type_ref)
 
-        Map.put(acc, id, Map.put(node_result, :errors, errors))
+        # a decision table's columns have types of their own
+        errors = errors ++ Map.get(node_result, :column_errors, [])
+        Map.put(acc, id, node_result |> Map.delete(:column_errors) |> Map.put(:errors, errors))
     end
   end
 
-  defp eval_node(%{expr: %{kind: :table} = table}, env), do: eval_table(table, env)
+  defp eval_node(%{expr: %{kind: :table} = table}, env, m), do: eval_table(table, env, m)
 
   # an expression the editor cannot edit yet is kept as it is and not evaluated
-  defp eval_node(%{expr: %{kind: :raw}}, _env), do: %{value: nil, cells: []}
+  defp eval_node(%{expr: %{kind: :raw}}, _env, _m), do: %{value: nil, cells: []}
 
-  defp eval_node(%{type: :bkm} = node, env) do
+  defp eval_node(%{type: :bkm} = node, env, m) do
     params = Model.params(node)
     # cells are checked with the parameters bound to null, the node's value is the function
-    cells = eval_node(%{node | type: :decision}, Enum.reduce(params, env, &Map.put(&2, &1, nil))).cells
+    cells = eval_node(%{node | type: :decision}, Enum.reduce(params, env, &Map.put(&2, &1, nil)), m).cells
 
     fun =
       case Feel.eval("function(" <> Enum.join(params, ", ") <> ") " <> body_text(node), env, sandbox: false) do
@@ -51,7 +53,7 @@ defmodule DmnSpike.Eval do
     %{value: fun, cells: cells}
   end
 
-  defp eval_node(node, env) do
+  defp eval_node(node, env, _m) do
     {cells, _env, last, context} =
       Enum.reduce(Model.cells(node), {[], env, nil, %{}}, fn {label, text}, {acc, env, _, ctx} ->
         result = eval(text, env)
@@ -70,7 +72,7 @@ defmodule DmnSpike.Eval do
 
   # --- decision tables -------------------------------------------------------------
 
-  defp eval_table(t, env) do
+  defp eval_table(t, env, m) do
     inputs = Enum.map(t.inputs, &eval(&1.expr, env))
     vals = Enum.map(inputs, &value_of/1)
     # names such as `Back End Ratio - 20` only parse correctly when the parser knows the names in scope
@@ -109,9 +111,31 @@ defmodule DmnSpike.Eval do
     %{
       value: value,
       cells: [],
+      column_errors: column_errors(m, t, vals, rules, chosen),
       table: %{matched: Enum.map(rules, & &1.matched), chosen: chosen, errors: errors, message: message}
     }
   end
+
+  # Each input value against its column's type, and the outputs of the rules that make up the result against
+  # the output columns' types (custom types and their constraints resolve through the model).
+  defp column_errors(m, t, vals, rules, chosen) do
+    inputs =
+      for {col, i} <- Enum.with_index(t.inputs),
+          ref = typed(col),
+          e <- Types.validate(m, Enum.at(vals, i), ref),
+          do: "input column #{i + 1}: #{e}"
+
+    outputs =
+      for ri <- chosen,
+          {col, k} <- Enum.with_index(t.outputs),
+          ref = typed(col),
+          e <- Types.validate(m, value_of(Enum.at(Enum.at(rules, ri).outs, k)), ref),
+          do: "output column #{k + 1}: #{e}"
+
+    Enum.uniq(inputs ++ outputs)
+  end
+
+  defp typed(col), do: if(Map.get(col, :type_ref) not in [nil, ""], do: col.type_ref)
 
   # one output column gives its value, several give a context keyed by the output names
   defp rule_value(_names, [value]), do: value

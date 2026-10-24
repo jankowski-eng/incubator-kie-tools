@@ -78,15 +78,74 @@ defmodule DmnSpike.Svg do
 
   def center(n), do: {n.x + n.w / 2, n.y + n.h / 2}
 
-  @doc "Point where the ray from the centre of `n` towards `{tx, ty}` leaves its rectangle."
+  @bkm_cut 14
+
+  @doc """
+  Point where the ray from the centre of `n` towards `{tx, ty}` leaves the outline of `n`: the capsule of an
+  input, the cut-cornered polygon of a business knowledge model, the rectangle of everything else.
+  """
   def border(n, {tx, ty}) do
     {cx, cy} = center(n)
     {dx, dy} = {tx - cx, ty - cy}
+
+    t =
+      cond do
+        dx == 0 and dy == 0 -> 0
+        n.type == :input -> capsule_t(n, dx, dy)
+        n.type == :bkm -> polygon_t(n, bkm_points(n), dx, dy)
+        true -> rect_t(n, dx, dy)
+      end
+
+    {Float.round(cx + dx * t, 1), Float.round(cy + dy * t, 1)}
+  end
+
+  defp rect_t(n, dx, dy) do
     sx = if dx == 0, do: :infinity, else: n.w / 2 / abs(dx)
     sy = if dy == 0, do: :infinity, else: n.h / 2 / abs(dy)
-    t = min_num(sx, sy)
-    t = if t == :infinity, do: 0, else: t
-    {Float.round(cx + dx * t, 1), Float.round(cy + dy * t, 1)}
+    min_num(sx, sy)
+  end
+
+  # a rectangle whose short sides are half circles: leave through the flat top or bottom, else the round end
+  defp capsule_t(n, dx, dy) do
+    r = n.h / 2
+    a = max(n.w / 2 - r, 0.0)
+    k = dx * dx + dy * dy
+
+    cond do
+      dy == 0 -> n.w / 2 / abs(dx)
+      r / abs(dy) * abs(dx) <= a -> r / abs(dy)
+      true -> (a * abs(dx) + :math.sqrt(max(r * r * k - a * a * dy * dy, 0.0))) / k
+    end
+  end
+
+  # the corners the shape cuts: top left and bottom right (DMN's business knowledge model)
+  defp bkm_points(n) do
+    c = min(@bkm_cut, min(n.w, n.h) / 2)
+
+    [{c, 0}, {n.w, 0}, {n.w, n.h - c}, {n.w - c, n.h}, {0, n.h}, {0, c}]
+    |> Enum.map(fn {x, y} -> {n.x + x, n.y + y} end)
+  end
+
+  # the first edge of the polygon the ray from the centre hits
+  defp polygon_t(n, pts, dx, dy) do
+    {cx, cy} = center(n)
+
+    pts
+    |> Enum.zip(tl(pts) ++ [hd(pts)])
+    |> Enum.flat_map(fn {{x1, y1}, {x2, y2}} ->
+      {ex, ey} = {x2 - x1, y2 - y1}
+      denom = dx * ey - dy * ex
+      {px, py} = {x1 - cx, y1 - cy}
+
+      if denom == 0 do
+        []
+      else
+        t = (px * ey - py * ex) / denom
+        s = (px * dy - py * dx) / denom
+        if t > 0 and s >= -1.0e-9 and s <= 1 + 1.0e-9, do: [t], else: []
+      end
+    end)
+    |> Enum.min(fn -> rect_t(n, dx, dy) end)
   end
 
   defp min_num(:infinity, b), do: b
