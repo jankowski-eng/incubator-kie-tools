@@ -1,0 +1,13 @@
+{
+  "name": "coi-probe",
+  "version": "0.0.1",
+  "publisher": "probe",
+  "keywords": [],
+  "main": "extension.js",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ]
+}

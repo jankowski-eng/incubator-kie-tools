@@ -1,0 +1,3232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      // theme: follows the browser until the toggle picks one, which is remembered in this browser
+      (() => {
+        const root = document.documentElement;
+        const dark = matchMedia("(prefers-color-scheme: dark)");
+        try {
+          const saved = localStorage.getItem("theme");
+          if (saved === "light" || saved === "dark") root.dataset.theme = saved;
+        } catch {}
+        const current = () => root.dataset.theme || (dark.matches ? "dark" : "light");
+        const label = () => {
+          const b = document.querySelector("#theme");
+          if (!b) return;
+          const next = current() === "dark" ? "light" : "dark";
+          b.textContent = next === "light" ? "☀" : "☾";
+          b.title = `Switch to ${next} theme`;
+          b.setAttribute("aria-label", b.title);
+        };
+        dark.addEventListener("change", label);
+        document.addEventListener("DOMContentLoaded", () => {
+          label();
+          document.querySelector("#theme").addEventListener("click", () => {
+            root.dataset.theme = current() === "dark" ? "light" : "dark";
+            try {
+              localStorage.setItem("theme", root.dataset.theme);
+            } catch {}
+            label();
+          });
+        });
+      })();
+    </script>
+    <title>DMN Editor · Popcorn spike</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 1.5 22.5 12 12 22.5 1.5 12z' fill='%233b5bdb'/%3E%3C/svg%3E"
+    />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+        --bg: light-dark(#f4f6f9, #0e1117);
+        --surface: light-dark(#ffffff, #161b24);
+        --surface-2: light-dark(#eff2f6, #1e2430);
+        --border: light-dark(#e1e5eb, #272e3b);
+        --border-strong: light-dark(#cdd3dc, #38414f);
+        --text: light-dark(#1a2230, #e7eaf0);
+        --muted: light-dark(#667085, #97a1b2);
+        --accent: light-dark(#3b5bdb, #7f96ff);
+        --accent-ink: light-dark(#ffffff, #0e1117);
+        --accent-soft: light-dark(#e9eeff, #212b50);
+        --danger: light-dark(#d13b4d, #ff7c8a);
+        --danger-soft: light-dark(#fdeceb, #3b2027);
+        --warn: light-dark(#a8610f, #f0b155);
+        --edge: light-dark(#7a8497, #8b95a8);
+        --grid: light-dark(#d4dae3, #262d3a);
+        --shadow: light-dark(rgba(23, 32, 50, 0.16), rgba(0, 0, 0, 0.5));
+        --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+        --dec: light-dark(#5b7fe0, #7f9bff);
+        --dec-fill: light-dark(#eaf0ff, #1d2848);
+        --inp: light-dark(#3aa876, #45c58d);
+        --inp-fill: light-dark(#e6f6ee, #14332a);
+        --bkm: light-dark(#cf982a, #e5b04a);
+        --bkm-fill: light-dark(#fff3d9, #3a2f15);
+
+        --k: light-dark(#7c3aed, #c4b5fd);
+        --n: light-dark(#b45309, #fbbf24);
+        --s: light-dark(#15803d, #4ade80);
+        --c: light-dark(#8a93a1, #8892a2);
+        --fn: light-dark(#0e7490, #22d3ee);
+      }
+      /* the theme toggle pins one scheme; without it the browser setting decides */
+      :root[data-theme="light"] {
+        color-scheme: light;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 400 14px/1.45 var(--font);
+        -webkit-font-smoothing: antialiased;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+      }
+      ::selection {
+        background: color-mix(in srgb, var(--accent) 30%, transparent);
+      }
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+
+      /* ---- top bar ---------------------------------------------------------- */
+      .topbar {
+        position: relative;
+        z-index: 20;
+        flex: none;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.6rem 1rem;
+        padding: 0.45rem 1rem;
+        background: color-mix(in srgb, var(--surface) 92%, transparent);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--border);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+      .brand svg {
+        width: 20px;
+        height: 20px;
+        fill: var(--accent);
+      }
+      .brand small {
+        font-weight: 500;
+        color: var(--muted);
+        padding: 0.1rem 0.45rem;
+        border-radius: 999px;
+        background: var(--surface-2);
+        font-size: 11px;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      /* icon-only buttons: undo, redo and the XML panel's tools */
+      button.icon {
+        width: 30px;
+        padding: 0;
+        color: var(--text);
+        border-color: transparent;
+        background: transparent;
+      }
+      button.icon:hover:not(:disabled) {
+        background: var(--surface-2);
+        border-color: var(--border);
+      }
+      button.icon:disabled {
+        color: var(--muted);
+        opacity: 0.35;
+      }
+      button.icon[aria-pressed="true"] {
+        color: var(--accent);
+        background: var(--accent-soft);
+      }
+      button.icon svg,
+      .xmlbtn svg {
+        width: 17px;
+        height: 17px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .xmlbtn[aria-pressed="true"] {
+        color: var(--accent);
+        background: var(--accent-soft);
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+      }
+      .toolbar .sep {
+        width: 1px;
+        height: 20px;
+        background: var(--border-strong);
+        margin: 0 0.25rem;
+      }
+      .menu {
+        position: relative;
+      }
+      /* the same chevron as the tree rows; it flips while the menu is open */
+      .menu > button svg {
+        width: 12px;
+        height: 12px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition: transform 0.12s;
+      }
+      .menu > button[aria-expanded="true"] svg {
+        transform: rotate(180deg);
+      }
+      .menu-items {
+        top: calc(100% + 6px);
+        left: 0;
+        display: flex;
+        flex-direction: column;
+        min-width: 11rem;
+        padding: 4px;
+        z-index: 40;
+      }
+      .menu-items button {
+        justify-content: flex-start;
+        height: 32px;
+        border: 0;
+        background: transparent;
+      }
+      .menu-items button:hover {
+        background: var(--accent-soft);
+      }
+      #theme {
+        width: 30px;
+        padding: 0;
+        font-size: 15px;
+      }
+      .topbar #status {
+        flex: 1 1 14rem;
+        min-width: 0;
+        text-align: right;
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---- buttons, inputs ---------------------------------------------------- */
+      button,
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        height: 30px;
+        padding: 0 0.75rem;
+        font: 500 13px/1 var(--font);
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 7px;
+        cursor: pointer;
+        transition:
+          background 0.12s,
+          border-color 0.12s,
+          box-shadow 0.12s;
+        user-select: none;
+      }
+      button:hover:not(:disabled),
+      .btn:hover {
+        background: var(--surface-2);
+      }
+      button:active:not(:disabled) {
+        transform: translateY(0.5px);
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .btn.primary,
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-ink);
+      }
+      .btn.primary:hover,
+      button.primary:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--accent) 88%, black);
+      }
+      input:not([type="checkbox"]):not([type="file"]),
+      select {
+        height: 30px;
+        padding: 0 0.55rem;
+        font: 400 13px var(--font);
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 7px;
+      }
+      input:not([type="checkbox"]):not([type="file"]):focus,
+      select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+      }
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+      }
+
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 3px;
+        background: var(--surface-2);
+        border-radius: 10px;
+      }
+      .tabs button {
+        height: 28px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        border-radius: 7px;
+      }
+      .tabs button:hover:not(:disabled) {
+        background: transparent;
+        color: var(--text);
+      }
+      .tabs button[aria-pressed="true"] {
+        background: var(--surface);
+        color: var(--text);
+        box-shadow:
+          0 1px 2px var(--shadow),
+          0 0 0 1px var(--border);
+      }
+
+      /* ---- page: the canvas fills it, everything else floats above ------------ */
+      .page {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+      }
+      .work {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+      }
+      .work > section {
+        position: absolute;
+        inset: 0;
+      }
+      #view-types {
+        overflow: auto;
+        padding: 1rem 1.25rem 3rem;
+      }
+      .float {
+        position: absolute;
+        z-index: 5;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: 0 6px 24px var(--shadow);
+      }
+
+      /* toast: top centre, never takes clicks; import report: top right under the zoom controls */
+      #toast {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        z-index: 30;
+        max-width: calc(100% - 32px);
+        transform: translateX(-50%);
+        pointer-events: none;
+      }
+      .report {
+        position: absolute;
+        top: 56px;
+        right: 12px;
+        z-index: 30;
+        width: min(30rem, calc(100% - 24px));
+      }
+      .report,
+      .toast {
+        padding: 0.6rem 0.9rem;
+        font-size: 13px;
+        border-radius: 10px;
+        box-shadow: 0 6px 24px var(--shadow);
+      }
+      .report {
+        max-height: 40vh;
+        overflow: auto;
+        background: var(--surface);
+        border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+      }
+      .report:empty {
+        display: none;
+      }
+      .report {
+        padding: 0;
+      }
+      .rep {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.25rem 0.9rem;
+        padding: 0.45rem 0.6rem 0.45rem 0.9rem;
+      }
+      .rep .good {
+        color: var(--s);
+        font-weight: 600;
+      }
+      .rep details {
+        flex-basis: 100%;
+        order: 3;
+      }
+      .rep summary {
+        cursor: pointer;
+        color: var(--accent);
+        font-weight: 550;
+      }
+      .rep .x {
+        margin-left: auto;
+        height: 24px;
+        width: 24px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+      }
+      .rep .x:hover {
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+        color: var(--text);
+      }
+      .rep .bad,
+      .report .bad {
+        color: var(--danger);
+      }
+      .rep ul.dropped {
+        margin: 0.3rem 0 0.1rem;
+        padding-left: 1.2rem;
+        color: var(--muted);
+      }
+      .toast {
+        background: var(--text);
+        color: var(--bg);
+        font-weight: 500;
+      }
+      .toast.error {
+        background: var(--danger);
+        color: #fff;
+      }
+      button.dismiss,
+      button.close {
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        font-size: 12px;
+        color: var(--muted);
+        border-color: transparent;
+        background: transparent;
+      }
+
+      .stage {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        background: var(--surface);
+      }
+      svg#drd {
+        display: block;
+        width: 100%;
+        height: 100%;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+        color: var(--edge);
+      }
+      svg#drd:active {
+        cursor: grabbing;
+      }
+      #grid {
+        pointer-events: none;
+      }
+      #dots circle {
+        fill: var(--grid);
+      }
+
+      /* a narrow strip of shape icons, like bpmn.io, so it hides as little of the diagram as possible */
+      /* the card over an empty canvas: only the card takes clicks, the canvas below stays usable */
+      .emptystate {
+        position: absolute;
+        inset: 0;
+        z-index: 4;
+        display: grid;
+        place-items: center;
+        padding: 1rem 5rem;
+        pointer-events: none;
+      }
+      .emptycard {
+        position: relative;
+        width: min(24rem, 100%);
+        padding: 1.6rem 1.5rem 1.4rem;
+        text-align: center;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 16px;
+        box-shadow: 0 12px 40px var(--shadow);
+        pointer-events: auto;
+      }
+      .emptycard .close {
+        position: absolute;
+        top: 0.6rem;
+        right: 0.6rem;
+        width: 28px;
+        height: 28px;
+        color: var(--muted);
+      }
+      .emptycard .cursor {
+        width: 44px;
+        height: 44px;
+        fill: var(--muted);
+        stroke: var(--muted);
+        stroke-width: 1.2;
+        stroke-linejoin: round;
+      }
+      .emptycard h2 {
+        margin: 0.8rem 0 0.3rem;
+        font-size: 16px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+      .emptycard p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .emptycard p.or {
+        margin: 0.9rem 0 0.7rem;
+        font-size: 12px;
+      }
+      .starters {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.15rem;
+      }
+      button.starter {
+        height: 32px;
+        padding: 0 0.7rem;
+        color: var(--accent);
+        font-size: 13.5px;
+        border-color: transparent;
+        background: transparent;
+      }
+      button.starter:hover:not(:disabled) {
+        background: var(--accent-soft);
+      }
+      button.starter svg {
+        width: 20px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linejoin: round;
+      }
+      button.starter svg .decision {
+        fill: var(--dec-fill);
+        stroke: var(--dec);
+      }
+      button.starter svg .input {
+        fill: var(--inp-fill);
+        stroke: var(--inp);
+      }
+      #palette {
+        top: 12px;
+        left: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        padding: 0.4rem;
+      }
+      /* each element is drawn like it is on the diagram */
+      .pal {
+        width: 42px;
+        height: 28px;
+        cursor: grab;
+        user-select: none;
+        transition: transform 0.12s;
+      }
+      .pal:hover {
+        transform: translateY(-1px);
+      }
+      .pal:active {
+        cursor: grabbing;
+      }
+      .pal svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        stroke-width: 1.6;
+        pointer-events: none;
+      }
+      .pal.decision svg > * {
+        fill: var(--dec-fill);
+        stroke: var(--dec);
+      }
+      .pal.input svg > * {
+        fill: var(--inp-fill);
+        stroke: var(--inp);
+      }
+      .pal.bkm svg > * {
+        fill: var(--bkm-fill);
+        stroke: var(--bkm);
+      }
+      .pal.annotation svg > *,
+      .pal.group svg > * {
+        fill: none;
+        stroke: var(--text);
+      }
+      .pal.source svg > * {
+        fill: var(--surface-2);
+        stroke: var(--text);
+      }
+
+      .zoomctl {
+        top: 12px;
+        right: 12px;
+        display: flex;
+        overflow: hidden;
+        border-radius: 8px;
+      }
+      .zoomctl button {
+        height: 30px;
+        min-width: 32px;
+        padding: 0 0.6rem;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+      .zoomctl button + button {
+        border-left: 1px solid var(--border);
+      }
+
+      /* ---- diagram ------------------------------------------------------------ */
+      .node {
+        cursor: grab;
+        filter: drop-shadow(0 1px 1.5px var(--shadow));
+        transition: filter 0.15s;
+      }
+      .node:hover {
+        filter: drop-shadow(0 3px 7px var(--shadow));
+      }
+      .node .shape {
+        stroke-width: 1.4;
+        transition:
+          stroke 0.12s,
+          stroke-width 0.12s,
+          fill 0.15s;
+      }
+      .node .shape.decision {
+        fill: var(--dec-fill);
+        stroke: var(--dec);
+      }
+      .node .shape.input {
+        fill: var(--inp-fill);
+        stroke: var(--inp);
+      }
+      .node .shape.bkm {
+        fill: var(--bkm-fill);
+        stroke: var(--bkm);
+      }
+      .node text {
+        fill: var(--text);
+        font: 600 12px var(--font);
+        letter-spacing: -0.005em;
+        pointer-events: none;
+        user-select: none;
+      }
+      .node text.nv {
+        fill: var(--muted);
+        font: 500 10.5px var(--mono);
+        letter-spacing: 0;
+      }
+      .node.sel {
+        filter: drop-shadow(0 0 0 transparent)
+          drop-shadow(0 4px 12px color-mix(in srgb, var(--accent) 38%, transparent));
+      }
+      .node.sel .shape {
+        stroke: var(--accent);
+        stroke-width: 2.6;
+      }
+      .node.invalid .shape {
+        stroke: var(--danger);
+        stroke-dasharray: 5 3;
+        fill: var(--danger-soft);
+      }
+      .node .handle {
+        display: none;
+        cursor: crosshair;
+      }
+      .node .handle circle {
+        fill: var(--accent);
+        stroke: var(--surface);
+        stroke-width: 2.5;
+      }
+      .node .handle path {
+        fill: none;
+        stroke: var(--accent-ink);
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      /* the in-place rename field (placed by the dblclick handler) */
+      input.rename {
+        position: absolute;
+        z-index: 6;
+        padding: 0 0.3rem;
+        font-weight: 600;
+        text-align: center;
+        box-shadow: 0 4px 14px var(--shadow);
+      }
+      .node:hover .handle {
+        display: block;
+      }
+      .node .hoverpad {
+        fill: transparent;
+      }
+      .node .handle:hover circle {
+        fill: color-mix(in srgb, var(--accent) 80%, black);
+      }
+
+      /* while a connection is being dragged: valid targets light up, the rest fade */
+      svg#drd.connecting,
+      svg#drd.connecting .node {
+        cursor: crosshair;
+      }
+      svg#drd.connecting .node .handle {
+        display: none;
+      }
+      svg#drd.connecting .node:not(.target):not(.src) {
+        opacity: 0.35;
+      }
+      .node.target .shape {
+        stroke: var(--s);
+        stroke-width: 2.2;
+        stroke-dasharray: 6 3;
+      }
+      .node.target.hot .shape {
+        stroke-width: 3.4;
+        stroke-dasharray: none;
+      }
+      /* the four anchors of a valid target; the nearest one to the pointer is filled */
+      .node .anchor {
+        display: none;
+        fill: var(--surface);
+        stroke: var(--s);
+        stroke-width: 2;
+      }
+      svg#drd.connecting .node.target .anchor {
+        display: block;
+      }
+      .node .anchor.hot {
+        fill: var(--s);
+      }
+      .node.target.hot {
+        filter: drop-shadow(0 0 8px color-mix(in srgb, var(--s) 55%, transparent));
+      }
+      .edge .hit {
+        stroke: transparent;
+        stroke-width: 12;
+        cursor: pointer;
+      }
+      .edge .vis {
+        stroke: var(--edge);
+        stroke-width: 1.5;
+        transition: stroke 0.12s;
+      }
+      .edge:hover .vis {
+        stroke: var(--muted);
+      }
+      .edge.sel .vis {
+        stroke: var(--accent);
+        stroke-width: 2.4;
+      }
+      #arrow-fill path {
+        fill: var(--edge);
+      }
+      #arrow-open path {
+        stroke: var(--edge);
+      }
+      #preview {
+        pointer-events: none;
+      }
+      #preview line {
+        stroke: var(--accent);
+      }
+
+      /* ---- node header and expression tables ----------------------------------- */
+      /* the dock floats over the bottom of the canvas; its height is the user's (a grip on its top edge) */
+      #dock {
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        display: flex;
+        flex-direction: column;
+        height: var(--dock-h, auto);
+        max-height: min(85%, 60rem);
+      }
+      #dock:not(:has(#panel:not(:empty))) {
+        display: none;
+      }
+      #panel {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 0 0.75rem 0.75rem;
+      }
+      #splitter {
+        flex: none;
+        position: relative;
+        height: 16px;
+        cursor: row-resize;
+        outline-offset: -2px;
+        touch-action: none;
+      }
+      #splitter::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 44px;
+        height: 4px;
+        margin: -2px 0 0 -22px;
+        border-radius: 2px;
+        background: var(--border-strong);
+        transition: background 0.12s;
+      }
+      #splitter:hover::after,
+      #splitter:focus-visible::after,
+      #splitter.drag::after {
+        background: var(--accent);
+      }
+      #dock.resizing {
+        transition: none;
+      }
+      .hint {
+        margin: 0;
+        padding: 1.4rem;
+        text-align: center;
+        color: var(--muted);
+        border: 1px dashed var(--border-strong);
+        border-radius: 12px;
+      }
+      .nodehead .close {
+        margin-left: auto;
+      }
+      .nodehead {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.6rem 1rem;
+        margin-bottom: 0.7rem;
+      }
+      .nodehead label {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .nodehead .nname {
+        height: 36px;
+        min-width: 16rem;
+        font: 650 16px var(--font);
+        letter-spacing: -0.01em;
+      }
+      input.params {
+        width: 14rem;
+        font: 13px var(--mono);
+      }
+      .errs {
+        color: var(--danger);
+        font-size: 12.5px;
+      }
+
+      table.boxed {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        font-size: 13px;
+        box-shadow: 0 1px 2px var(--shadow);
+      }
+      table.boxed th,
+      table.boxed td {
+        padding: 0;
+        vertical-align: top;
+        text-align: left;
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      table.boxed tr > :last-child {
+        border-right: 0;
+      }
+      table.boxed tbody tr:last-child > * {
+        border-bottom: 0;
+      }
+      table.boxed thead th {
+        padding: 0.5rem 0.75rem;
+        background: var(--surface-2);
+        color: var(--muted);
+        font-size: 11.5px;
+        font-weight: 650;
+        letter-spacing: 0.03em;
+      }
+      table.boxed:not(.dt) thead th {
+        font-size: 13px;
+        color: var(--text);
+        letter-spacing: 0;
+      }
+      table.boxed small {
+        margin-left: 0.5rem;
+        font-weight: 500;
+        color: var(--muted);
+      }
+      th.lbl {
+        width: 1%;
+        padding: 0.5rem 0.75rem !important;
+        white-space: nowrap;
+        font: 12px var(--mono);
+        color: var(--muted);
+        background: var(--surface-2);
+      }
+      td.val {
+        width: 22%;
+        padding: 0.45rem 0.75rem !important;
+        font: 12.5px/1.5 var(--mono);
+        background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+      }
+      td.val .bad,
+      .hl .err {
+        color: var(--danger);
+      }
+      td.val .warn {
+        display: block;
+        margin-top: 0.15rem;
+        font: 11.5px var(--font);
+        color: var(--warn);
+      }
+
+      .ed {
+        position: relative;
+        display: grid;
+      }
+      .ed pre.hl,
+      .ed textarea {
+        grid-area: 1 / 1;
+        margin: 0;
+        padding: 0.5rem 0.75rem;
+        font: 12.5px/1.55 var(--mono);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        border: 0;
+      }
+      .ed pre.hl {
+        pointer-events: none;
+      }
+      .ed textarea {
+        width: 100%;
+        height: 100%;
+        resize: none;
+        overflow: hidden;
+        outline: none;
+        background: transparent;
+        color: transparent;
+        caret-color: var(--text);
+      }
+      .ed:focus-within {
+        background: color-mix(in srgb, var(--accent) 6%, transparent);
+        box-shadow: inset 0 0 0 2px var(--accent);
+      }
+      .hl .k {
+        color: var(--k);
+        font-weight: 600;
+      }
+      .hl .n {
+        color: var(--n);
+      }
+      .hl .s {
+        color: var(--s);
+      }
+      .hl .c {
+        color: var(--c);
+        font-style: italic;
+      }
+      .hl .fn {
+        color: var(--fn);
+      }
+      .hl .op {
+        color: var(--muted);
+      }
+      .hl .err {
+        text-decoration: underline wavy var(--danger);
+        text-underline-offset: 3px;
+      }
+      .hl .eof::after {
+        content: "\00a0\00a0";
+      }
+      .ac {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        z-index: 8;
+      }
+      .ac ul {
+        margin: 4px 0 0;
+        padding: 4px;
+        list-style: none;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 9px;
+        box-shadow: 0 10px 28px var(--shadow);
+        font: 12.5px var(--mono);
+      }
+      .ac li {
+        padding: 0.3rem 0.65rem;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .ac li:first-child {
+        background: var(--accent-soft);
+      }
+      .ac li:hover {
+        background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+      }
+
+      /* decision tables */
+      table.dt th.hp {
+        width: 1%;
+        padding: 0.4rem 0.6rem;
+        vertical-align: middle;
+        white-space: nowrap;
+      }
+      table.dt th.hp select {
+        height: 26px;
+        font: 650 11.5px var(--font);
+      }
+      table.dt th.in,
+      table.dt th.outh {
+        position: relative;
+        min-width: 9rem;
+        padding: 0 !important;
+        font-weight: 400;
+        background: var(--surface);
+      }
+      table.dt th.in.empty {
+        padding: 0.5rem 0.75rem !important;
+        vertical-align: middle;
+      }
+      table.dt td.empty {
+        width: 1%;
+      }
+      table.dt td.norules {
+        padding: 0.75rem;
+        text-align: center;
+      }
+      table.dt th.in .ed,
+      table.dt th.outh .ed {
+        background: var(--surface);
+      }
+      table.dt .outname {
+        padding: 0.5rem 0.75rem;
+        color: var(--text);
+        font-weight: 600;
+        font-size: 13px;
+        letter-spacing: 0;
+      }
+      /* the column's typeRef, under its expression */
+      table.dt select.coltype {
+        width: 100%;
+        height: 24px;
+        padding: 0 0.6rem;
+        font: 500 11px var(--mono);
+        color: var(--muted);
+        background: transparent;
+        border: 0;
+        border-top: 1px dashed var(--border);
+        border-radius: 0;
+      }
+      table.dt select.coltype:hover {
+        color: var(--text);
+        background: var(--surface-2);
+      }
+      table.dt select.coltype:focus {
+        box-shadow: inset 0 0 0 2px var(--accent);
+      }
+      table.dt td.rn {
+        position: relative;
+        width: 1%;
+        padding: 0.5rem 0.75rem !important;
+        text-align: center;
+        vertical-align: middle;
+        font: 12px var(--mono);
+        color: var(--muted);
+      }
+      table.dt td.rm {
+        width: 1%;
+        vertical-align: middle;
+      }
+      table.dt td.out {
+        min-width: 8rem;
+        background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+      }
+      table.dt th.noteh {
+        width: 12%;
+      }
+      table.dt td.note {
+        width: 12%;
+      }
+
+      /* add and delete controls: only visible while the pointer (or keyboard focus) is on that row or header */
+      table.dt .rowact,
+      table.dt .colact {
+        opacity: 0;
+        pointer-events: none;
+      }
+      table.dt tr.rule:hover .rowact,
+      table.dt tr.rule:focus-within .rowact,
+      table.dt th:hover > .colact,
+      table.dt th:focus-within > .colact {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      table.dt tr.rule:hover td.rn,
+      table.dt tr.rule:focus-within td.rn,
+      table.dt th:hover,
+      table.dt th:focus-within {
+        z-index: 3;
+      }
+      table.dt button.ins {
+        position: absolute;
+        z-index: 4;
+        width: 18px;
+        height: 18px;
+        min-width: 0;
+        padding: 0;
+        font-size: 14px;
+        line-height: 1;
+        color: var(--accent-ink);
+        background: var(--accent);
+        border: 2px solid var(--surface);
+        border-radius: 50%;
+        box-sizing: content-box;
+        margin: -2px;
+      }
+      table.dt button.ins:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--accent) 80%, black);
+      }
+      table.dt button.ins.up {
+        top: -9px;
+        left: 50%;
+        margin-left: -9px;
+      }
+      table.dt button.ins.down {
+        bottom: -9px;
+        left: 50%;
+        margin-left: -9px;
+      }
+      table.dt button.ins.left {
+        left: -9px;
+        top: 50%;
+        margin-top: -9px;
+      }
+      table.dt button.ins.right {
+        right: -9px;
+        top: 50%;
+        margin-top: -9px;
+      }
+      table.dt button.del {
+        height: 22px;
+        min-width: 22px;
+        padding: 0;
+        font-size: 11px;
+        color: var(--muted);
+        border-color: transparent;
+        background: transparent;
+      }
+      table.dt button.del:hover {
+        color: var(--danger);
+        background: var(--danger-soft);
+      }
+      table.dt th > button.del {
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        z-index: 2;
+      }
+      table.dt td.rm button.del {
+        margin: 0 0.3rem;
+      }
+
+      table.dt tr.rule.hit > td {
+        background: var(--accent-soft);
+      }
+      table.dt tr.rule.hit > td.rn {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      table.dt tr.rule.hit > td.out {
+        background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+      }
+      /* matches, but the hit policy (FIRST) does not use it */
+      table.dt tr.rule.also > td.rn {
+        color: var(--accent);
+        box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+      }
+      table.dt tr.rule.also > td {
+        background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+      }
+      table.dt tfoot td {
+        padding: 0.6rem 0.75rem;
+        border: 0;
+        background: var(--surface-2);
+      }
+      table.dt .dtv {
+        font: 12.5px var(--mono);
+      }
+      table.dt .dtv b {
+        color: var(--accent);
+      }
+      table.dt .dtv .warn {
+        font: 12px var(--font);
+        color: var(--danger);
+      }
+
+      /* data types: tree on the left, properties on the right */
+      #view-types {
+        overflow: hidden;
+        padding: 0;
+      }
+      #types,
+      #tview {
+        height: 100%;
+      }
+      #tview {
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+      }
+      .ttoolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.55rem 1rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .ttoolbar input[type="search"] {
+        width: min(22rem, 100%);
+      }
+      .ttoolbar .grow {
+        flex: 1;
+      }
+      .ttoolbar button[aria-pressed="true"] {
+        background: var(--accent-soft);
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+      }
+      #tview {
+        position: relative;
+      }
+      .tlayout {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+      }
+      #ttree {
+        flex: 1 1 0;
+        min-width: 0;
+        overflow: auto;
+        padding: 0 0.5rem 3rem;
+        outline: none;
+      }
+      #ttree:focus-visible {
+        box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+      }
+      #ttree > .hint {
+        margin: 1rem;
+      }
+      .thead,
+      .trow {
+        display: grid;
+        grid-template-columns: minmax(12rem, 2fr) minmax(6rem, 1fr) minmax(6rem, 1.3fr) 4.2rem;
+        align-items: center;
+        column-gap: 0.75rem;
+        padding: 0 0.5rem;
+      }
+      .thead {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        height: 28px;
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+      }
+      .trow {
+        height: 28px;
+        margin-top: 1px;
+        border-radius: 6px;
+        cursor: default;
+        user-select: none;
+      }
+      .trow:hover {
+        background: var(--surface-2);
+      }
+      .trow.sel {
+        background: var(--accent-soft);
+        box-shadow: inset 2px 0 0 var(--accent);
+      }
+      .timp {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        margin: 1rem 0.5rem 0.25rem;
+        padding-top: 0.6rem;
+        border-top: 1px solid var(--border);
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .timp small {
+        font-weight: 400;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+      .trow.imp:hover {
+        background: transparent;
+      }
+      .tcell-name {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        min-width: 0;
+        padding-left: calc(var(--d) * 18px);
+      }
+      .tchev {
+        flex: none;
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .tchev:hover {
+        background: color-mix(in srgb, var(--text) 12%, transparent);
+      }
+      .tchev svg {
+        width: 12px;
+        height: 12px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .ticon {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        min-width: 20px;
+        height: 18px;
+        padding: 0 3px;
+        font: 600 10.5px var(--mono);
+        border-radius: 4px;
+        color: var(--muted);
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+      }
+      .trow.sel .ticon {
+        background: var(--surface);
+      }
+      .ticon.k-struct {
+        color: var(--dec);
+      }
+      .tname {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 500;
+      }
+      .tname.struct {
+        font-weight: 650;
+      }
+      .tname mark {
+        color: inherit;
+        background: color-mix(in srgb, var(--accent) 28%, transparent);
+        border-radius: 2px;
+      }
+      .terr {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 15px;
+        height: 15px;
+        font: 700 10px var(--font);
+        color: #fff;
+        background: var(--danger);
+        border-radius: 50%;
+      }
+      .trow.err .tname {
+        text-decoration: underline wavy var(--danger);
+        text-underline-offset: 3px;
+      }
+      .ttype,
+      .tcons {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: 12px var(--mono);
+        color: var(--muted);
+      }
+      .ttype {
+        cursor: pointer;
+      }
+      .ttype:hover {
+        color: var(--text);
+      }
+      .ttype.custom {
+        color: var(--accent);
+      }
+      .ttype .coll {
+        margin-left: 1px;
+        color: var(--text);
+      }
+      .tcons {
+        color: var(--text);
+      }
+      .tcons .none {
+        color: var(--muted);
+      }
+      .tact {
+        display: flex;
+        justify-content: flex-end;
+        gap: 2px;
+        opacity: 0;
+      }
+      .trow:hover .tact,
+      .trow.sel .tact,
+      .trow:focus-within .tact {
+        opacity: 1;
+      }
+      .tact button {
+        height: 22px;
+        min-width: 22px;
+        padding: 0;
+        font-size: 12px;
+        color: var(--muted);
+        background: transparent;
+        border-color: transparent;
+      }
+      .tact button:hover {
+        color: var(--text);
+        background: var(--surface);
+        border-color: var(--border-strong);
+      }
+      .tact button[data-click^="tdel"]:hover {
+        color: var(--danger);
+        background: var(--danger-soft);
+      }
+      input.tedit,
+      select.tedit {
+        height: 22px;
+        min-width: 0;
+        width: 100%;
+        padding: 0 0.3rem;
+        font: 12.5px var(--font);
+      }
+      select.tedit {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      #tinspector {
+        --iw: clamp(18rem, 30vw, 26rem);
+        flex: 0 0 var(--iw);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+        border-left: 1px solid var(--border);
+        background: var(--bg);
+        transition:
+          flex-basis 0.28s var(--ease),
+          opacity 0.2s ease,
+          visibility 0s;
+      }
+      /* the content keeps its width while the panel grows, so nothing reflows during the slide */
+      #tinspector > * {
+        width: var(--iw);
+      }
+      #tinspector > .hint {
+        width: calc(var(--iw) - 2rem);
+        margin: 1rem;
+      }
+      #tview[data-inspector="closed"] #tinspector {
+        flex-basis: 0;
+        opacity: 0;
+        visibility: hidden;
+        border-left-color: transparent;
+        transition:
+          flex-basis 0.28s var(--ease),
+          opacity 0.18s ease,
+          visibility 0s linear 0.28s;
+      }
+      .ihead {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.7rem 0.9rem;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+      .ihead > div {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        line-height: 1.25;
+      }
+      .ihead b {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ihead small,
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .ibody {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.9rem;
+        padding: 0.9rem;
+      }
+      .ifield {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      .ifield > label,
+      .isec h4 {
+        margin: 0;
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .ibody input:not([type="checkbox"]),
+      .ibody select {
+        width: 100%;
+      }
+      small.bad {
+        display: block;
+        min-height: 0;
+        color: var(--danger);
+        font-size: 12px;
+      }
+      small.bad:empty {
+        display: none;
+      }
+      .switch {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+      }
+      .switch small {
+        color: var(--muted);
+      }
+      .isec {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .seg {
+        display: flex;
+        padding: 2px;
+        gap: 2px;
+        background: var(--surface-2);
+        border-radius: 8px;
+      }
+      .seg button {
+        flex: 1;
+        height: 26px;
+        padding: 0 0.3rem;
+        font-size: 12px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+      }
+      .seg button[aria-pressed="true"] {
+        color: var(--text);
+        background: var(--surface);
+        box-shadow:
+          0 1px 2px var(--shadow),
+          0 0 0 1px var(--border);
+      }
+      .crow {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .crow select {
+        flex: none;
+        width: 3.4rem !important;
+        font-family: var(--mono);
+      }
+      .crow input {
+        min-width: 0;
+        font-family: var(--mono);
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+      }
+      .chips:empty {
+        display: none;
+      }
+      .chips .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.2rem;
+        padding: 0 0.2rem 0 0.55rem;
+        height: 24px;
+        font: 12px var(--mono);
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 999px;
+      }
+      .chips .chip button {
+        height: 18px;
+        min-width: 18px;
+        padding: 0;
+        font-size: 10px;
+        color: var(--muted);
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+      }
+      .chips .chip button:hover {
+        color: var(--danger);
+        background: var(--danger-soft);
+      }
+      #tinspector .ed {
+        border: 1px solid var(--border-strong);
+        border-radius: 7px;
+        background: var(--surface);
+      }
+      .kindsel {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .kindsel select {
+        width: auto !important;
+        height: 24px;
+      }
+      .usedby {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        font: 12.5px var(--mono);
+      }
+      .usedby li {
+        padding: 0.1rem 0;
+      }
+      .usedby small {
+        margin-left: 0.3rem;
+        color: var(--muted);
+        font: 11px var(--font);
+      }
+      .ifoot {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.7rem 0.9rem;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+      }
+      .ifoot .danger {
+        margin-left: auto;
+        color: var(--danger);
+      }
+      .ifoot .danger:hover {
+        background: var(--danger-soft);
+      }
+
+      /* ---- motion: things arrive and leave instead of switching ------------------ */
+      @keyframes fadein {
+        from {
+          opacity: 0;
+        }
+      }
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(14px);
+        }
+      }
+      @keyframes sink {
+        to {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+      }
+      @keyframes swap {
+        from {
+          opacity: 0;
+          transform: translateY(5px);
+        }
+      }
+      @keyframes drop {
+        from {
+          opacity: 0;
+          transform: translateY(-8px);
+        }
+      }
+      @keyframes toastin {
+        from {
+          opacity: 0;
+          transform: translate(-50%, -10px);
+        }
+      }
+      @keyframes pop {
+        from {
+          opacity: 0;
+          transform: scale(0.96) translateY(-4px);
+        }
+      }
+      /* the expression panel rises when a node is first selected, fades its content when another one is, sinks when closed */
+      #dock:has(#panel:not(:empty)) {
+        animation: rise 0.26s var(--ease);
+      }
+      #panel.swap > * {
+        animation: swap 0.2s var(--ease);
+      }
+      /* (the same specificity as the rule above, which would otherwise win while the panel still has content) */
+      #dock.closing,
+      #dock.closing:has(#panel:not(:empty)) {
+        animation: sink 0.17s ease forwards;
+      }
+      #toast:not([hidden]) {
+        animation: toastin 0.22s var(--ease);
+      }
+      .report:not(:empty) {
+        animation: drop 0.22s var(--ease);
+      }
+      .menu-items:not([hidden]) {
+        transform-origin: top left;
+        animation: pop 0.14s var(--ease);
+      }
+      .emptystate:not([hidden]) .emptycard {
+        animation: rise 0.34s var(--ease);
+      }
+      .work > section:not([hidden]) {
+        animation: fadein 0.2s ease;
+      }
+      .trow,
+      .tact,
+      .xl {
+        transition:
+          background-color 0.14s ease,
+          box-shadow 0.14s ease,
+          opacity 0.12s ease;
+      }
+      .xl {
+        transition-duration: 0.3s;
+      }
+      table.dt .rowact,
+      table.dt .colact {
+        transition: opacity 0.12s ease;
+      }
+      .tabs button {
+        transition:
+          background 0.15s ease,
+          color 0.15s ease,
+          box-shadow 0.15s ease;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          animation-delay: 0s !important;
+          transition-duration: 0.01ms !important;
+          transition-delay: 0s !important;
+        }
+      }
+
+      /* ---- XML source inspector ------------------------------------------------ */
+      /* closed it has no width and is invisible (so it cannot be focused); opening grows it from the right edge */
+      #xmlpane {
+        position: relative;
+        z-index: 6;
+        flex: 0 0 0;
+        min-width: 0;
+        max-width: 85%;
+        display: flex;
+        overflow: hidden;
+        opacity: 0;
+        visibility: hidden;
+        background: var(--surface);
+        border-left: 1px solid var(--border-strong);
+        box-shadow: none;
+        transition:
+          flex-basis 0.3s var(--ease),
+          min-width 0.3s var(--ease),
+          opacity 0.22s ease,
+          box-shadow 0.3s ease,
+          visibility 0s linear 0.3s;
+      }
+      #xmlpane.open {
+        flex-basis: var(--xw, 42%);
+        min-width: 20rem;
+        opacity: 1;
+        visibility: visible;
+        box-shadow: -8px 0 24px var(--shadow);
+        transition-delay: 0s;
+      }
+      /* dragging the edge must follow the pointer, not glide behind it */
+      #xmlpane.resizing {
+        transition: none;
+      }
+      .work {
+        overflow: hidden;
+      }
+      .page.xexp #xmlpane {
+        flex-basis: 100%;
+        max-width: 100%;
+      }
+      .xresize {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 3;
+        width: 6px;
+        cursor: col-resize;
+        touch-action: none;
+      }
+      .xresize:hover,
+      .xresize.drag,
+      .xresize:focus-visible {
+        background: color-mix(in srgb, var(--accent) 45%, transparent);
+        outline: none;
+      }
+      .page.xexp .xresize {
+        display: none;
+      }
+      .xmain {
+        flex: 1;
+        min-width: 20rem;
+        display: flex;
+        flex-direction: column;
+      }
+      .xhead,
+      .xsearch {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.4rem 0.6rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .xhead small,
+      #xcount {
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .xhead .grow {
+        flex: 1;
+      }
+      .xsearch input {
+        flex: 1;
+        min-width: 0;
+      }
+      #xcopy[data-done] {
+        color: var(--s);
+      }
+      #xcode {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 0.4rem 0 2rem;
+        font: 12.5px/20px var(--mono);
+        outline: none;
+        tab-size: 2;
+      }
+      #xcode:focus-visible {
+        box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+      }
+      .xchunk {
+        content-visibility: auto;
+        contain-intrinsic-size: auto 2000px;
+      }
+      .xl {
+        display: flex;
+        min-height: 20px;
+      }
+      .xn {
+        flex: none;
+        width: 4.2ch;
+        padding-right: 0.8ch;
+        text-align: right;
+        color: var(--muted);
+        opacity: 0.75;
+        user-select: none;
+        font-variant-numeric: tabular-nums;
+      }
+      .xg {
+        flex: none;
+        display: grid;
+        place-items: center;
+        width: 16px;
+        color: var(--muted);
+        user-select: none;
+      }
+      .xg[data-to] {
+        cursor: pointer;
+      }
+      /* the control is a real button (focusable, with a name and an expanded state): drop the button look */
+      button.xg {
+        height: auto;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 3px;
+        background: transparent;
+        box-shadow: none;
+      }
+      button.xg:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
+      .xg[data-to]:hover {
+        color: var(--text);
+      }
+      .xg svg {
+        width: 10px;
+        height: 10px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition: transform 0.1s;
+      }
+      .xg.folded svg {
+        transform: rotate(-90deg);
+      }
+      .xc {
+        flex: 1;
+        min-width: 0;
+        padding-right: 1rem;
+        white-space: pre;
+      }
+      #xcode.wrap .xc {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .xl.xhl {
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+      }
+      .xl.xhl-first {
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+      .xl.xhl:not(.xhl-first) {
+        box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 35%, transparent);
+      }
+      .xc .xp {
+        color: var(--muted);
+      }
+      .xc .xt {
+        color: var(--dec);
+        font-weight: 600;
+      }
+      .xc .xa {
+        color: var(--n);
+      }
+      .xc .xv {
+        color: var(--s);
+      }
+      .xc .xx {
+        color: var(--text);
+      }
+      .xc .xd {
+        color: var(--c);
+        font-style: italic;
+      }
+      ::highlight(xmatch) {
+        background: color-mix(in srgb, var(--n) 35%, transparent);
+      }
+      ::highlight(xcur) {
+        background: var(--accent);
+        color: var(--accent-ink);
+      }
+
+      @media (max-width: 900px) {
+        /* narrow: the properties are a sheet that rises over the tree */
+        #tinspector {
+          position: absolute;
+          inset: auto 0 0 0;
+          flex: none;
+          max-height: 60%;
+          border-top: 1px solid var(--border-strong);
+          box-shadow: 0 -8px 24px var(--shadow);
+          transition:
+            transform 0.28s var(--ease),
+            opacity 0.2s ease,
+            visibility 0s;
+        }
+        #tinspector > *,
+        #tinspector > .hint {
+          width: auto;
+        }
+        #tview[data-inspector="closed"] #tinspector {
+          transform: translateY(100%);
+          transition:
+            transform 0.28s var(--ease),
+            opacity 0.18s ease,
+            visibility 0s linear 0.28s;
+        }
+        .thead,
+        .trow {
+          grid-template-columns: minmax(8rem, 2fr) minmax(5rem, 1fr) 3.4rem;
+        }
+        .thead > :nth-child(3),
+        .trow > .tcons {
+          display: none;
+        }
+      }
+      @media (max-width: 820px) {
+        #palette {
+          flex-direction: row;
+        }
+        .zoomctl {
+          top: auto;
+          bottom: 12px;
+        }
+        #dock {
+          max-height: 55%;
+        }
+        .topbar #status {
+          text-align: left;
+          margin-left: 0;
+        }
+      }
+
+      /* ---- elements and tools from the remote: create-and-connect, type pill, delete badge, properties, annotations, sources, groups ---- */
+      .zoomctl #help-btn {
+        font-weight: 650;
+        color: var(--muted);
+      }
+      #help {
+        position: absolute;
+        top: 46px;
+        right: 10px;
+        z-index: 4;
+        width: min(22rem, calc(100% - 20px));
+        padding: 0.75rem 1rem;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 12px;
+        box-shadow: 0 10px 30px var(--shadow);
+        font-size: 12.5px;
+      }
+      #help h4 {
+        margin: 0 0 0.4rem;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      #help ul {
+        margin: 0;
+        padding-left: 1.1rem;
+      }
+      #help li {
+        margin: 0.25rem 0;
+      }
+
+      /* on-canvas actions of the selected node */
+      .node .del {
+        display: none;
+        cursor: pointer;
+      }
+      .node.sel .del {
+        display: block;
+      }
+      .node .del circle {
+        fill: var(--surface);
+        stroke: var(--danger);
+        stroke-width: 1.6;
+      }
+      .node .del path {
+        stroke: var(--danger);
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        fill: none;
+      }
+      .node .del:hover circle {
+        fill: var(--danger);
+      }
+      .node .del:hover path {
+        stroke: var(--surface);
+      }
+      /* create-and-connect pad beside the selected node */
+      .node .pad .bg {
+        fill: var(--surface);
+        stroke: var(--border-strong);
+        filter: drop-shadow(0 2px 6px var(--shadow));
+      }
+      .node .pad .mk {
+        cursor: pointer;
+      }
+      .node .pad .mk .hit {
+        fill: transparent;
+      }
+      .node .pad .mk:hover .hit {
+        fill: var(--accent-soft);
+      }
+      .node .pad .mk > :not(.hit):not(title) {
+        fill: none;
+        stroke: var(--text);
+        stroke-width: 1.6;
+      }
+
+      /* data type pill above the selected node */
+      .node .tpill {
+        cursor: pointer;
+      }
+      .node .tpill rect {
+        fill: var(--surface);
+        stroke: var(--border-strong);
+        filter: drop-shadow(0 2px 6px var(--shadow));
+      }
+      .node .tpill:hover rect {
+        stroke: var(--accent);
+      }
+      .node .tpill text {
+        fill: var(--text);
+        font-family: var(--mono);
+        pointer-events: none;
+      }
+      .node .tpill.none text {
+        fill: var(--muted);
+        font-family: var(--font);
+      }
+      .node .tpill path {
+        fill: none;
+        stroke: var(--muted);
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      /* inspector tabs and the properties pane */
+      .dtabs {
+        display: inline-flex;
+        gap: 2px;
+        padding: 3px;
+        margin-bottom: 0.7rem;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+      .dtabs button {
+        height: 26px;
+        padding: 0 0.8rem;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12.5px;
+        box-shadow: none;
+      }
+      .dtabs button[aria-pressed="true"] {
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: 0 1px 2px var(--shadow);
+      }
+      .props {
+        display: grid;
+        grid-template-columns: minmax(16rem, 2fr) minmax(14rem, 1fr);
+        gap: 1.25rem;
+        align-items: start;
+        padding: 1rem;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
+      .props .desc {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .props textarea {
+        width: 100%;
+        min-height: 6rem;
+        resize: vertical;
+        font: 13.5px/1.5 var(--font);
+        color: var(--text);
+      }
+      .props dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.55rem 1rem;
+        margin: 0;
+        font-size: 13px;
+      }
+      .props dt {
+        color: var(--muted);
+        font-size: 12px;
+        padding-top: 0.2rem;
+      }
+      .props dd {
+        margin: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+      }
+      .props .none {
+        color: var(--muted);
+      }
+      button.chip {
+        height: 24px;
+        padding: 0 0.6rem;
+        border-radius: 999px;
+        font-size: 12px;
+        background: var(--dec-fill);
+        border-color: var(--dec);
+        box-shadow: none;
+      }
+      button.chip.knowledge {
+        background: var(--bkm-fill);
+        border-color: var(--bkm);
+      }
+      .node .info {
+        cursor: pointer;
+      }
+      .node .info circle {
+        fill: var(--surface);
+        stroke: var(--text);
+        stroke-width: 1.4;
+      }
+      .node .info text {
+        fill: var(--text);
+        font-family: Georgia, serif;
+      }
+      @media (max-width: 820px) {
+        .props {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* text annotations */
+      .node.annotation .hitbox {
+        fill: transparent;
+      }
+      .node.annotation .shape {
+        stroke: var(--text);
+        stroke-width: 1.5;
+        fill: none;
+      }
+      .node.annotation.sel .shape {
+        stroke: var(--accent);
+      }
+      .node.annotation foreignObject {
+        pointer-events: none;
+      }
+      .atext {
+        font: 12.5px/1.4 var(--font);
+        color: var(--text);
+        white-space: pre-wrap;
+        overflow: hidden;
+        height: 100%;
+      }
+      .node .resize {
+        display: none;
+        cursor: nwse-resize;
+      }
+      .node.sel .resize {
+        display: block;
+      }
+      .node .resize rect {
+        fill: transparent;
+      }
+      .node .resize path {
+        stroke: var(--muted);
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        fill: none;
+      }
+      #drd marker#dot circle {
+        fill: currentColor;
+      }
+
+      .node .shape.source {
+        fill: var(--surface-2);
+        stroke: var(--text);
+        stroke-width: 1.5;
+      }
+      .node.source.sel .shape {
+        stroke: var(--accent);
+      }
+      .props .srchead {
+        display: flex;
+        flex-direction: column;
+        gap: 0.8rem;
+      }
+      .props .srchead input {
+        height: 34px;
+      }
+
+      .node.group .frame {
+        fill: color-mix(in srgb, var(--text) 3%, transparent);
+        pointer-events: none;
+      }
+      .node.group .shape {
+        fill: none;
+        stroke: var(--muted);
+        stroke-width: 1.5;
+        stroke-dasharray: 7 5;
+        pointer-events: stroke;
+      }
+      .node.group.sel .shape {
+        stroke: var(--accent);
+        stroke-dasharray: none;
+      }
+      .node.group .band {
+        fill: transparent;
+        cursor: grab;
+      }
+      .node.group .gname {
+        fill: var(--muted);
+        font-weight: 600;
+        pointer-events: none;
+      }
+
+      /* the problems list */
+      .problems {
+        height: 30px;
+        font-size: 12.5px;
+        white-space: nowrap;
+      }
+      .problems[data-level="ok"] {
+        color: var(--s);
+      }
+      .problems[data-level="warn"] {
+        color: var(--bkm);
+        border-color: var(--bkm);
+      }
+      .problems[data-level="bad"] {
+        color: var(--danger);
+        border-color: var(--danger);
+      }
+      #problems-pop {
+        position: fixed;
+        top: 56px;
+        right: 16px;
+        z-index: 50; /* above the import summary and the toast (30), which sit in the same corner */
+        width: min(30rem, calc(100vw - 32px));
+        max-height: min(60vh, 28rem);
+        overflow: auto;
+        padding: 0.6rem;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 12px;
+        box-shadow: 0 12px 34px var(--shadow);
+      }
+      #problems-pop h4 {
+        margin: 0.1rem 0.4rem 0.5rem;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      #problems-pop ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      #problems-pop .none {
+        margin: 0.3rem 0.4rem;
+        color: var(--muted);
+      }
+      .problem {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1px;
+        width: 100%;
+        height: auto;
+        padding: 0.45rem 0.6rem 0.45rem 0.8rem;
+        border: 0;
+        border-left: 3px solid var(--muted);
+        border-radius: 6px;
+        background: transparent;
+        text-align: left;
+        box-shadow: none;
+      }
+      .problem.error {
+        border-left-color: var(--danger);
+      }
+      .problem.warning {
+        border-left-color: var(--bkm);
+      }
+      .problem:hover {
+        background: var(--surface-2);
+      }
+      .problem b {
+        font-size: 12.5px;
+        color: var(--text);
+      }
+      .problem span {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: normal;
+      }
+
+      /* the status shrinks (and is cut with an ellipsis) before the toolbar wraps onto a second row */
+      .topbar #status {
+        flex: 1 1 5rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* test scenarios: named sets of input values, kept outside the DMN file */
+      #scn-toggle .lbl {
+        font-size: 11px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      #scn-name {
+        max-width: 9rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #scn-list button[aria-checked="true"]::before {
+        content: "✓";
+        margin-right: 0.45rem;
+      }
+      #scn-list button[aria-checked="false"]::before {
+        content: "";
+        display: inline-block;
+        width: 0.95rem;
+      }
+      .menu-items hr {
+        margin: 0.25rem 0;
+        border: 0;
+        border-top: 1px solid var(--border);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.5 22.5 12 12 22.5 1.5 12z" /></svg>
+        <span>DMN Editor</span>
+      </div>
+      <div class="menu" id="file-menu">
+        <button type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="file-items">
+          File<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
+        </button>
+        <div id="file-items" class="menu-items float" role="menu" hidden>
+          <button type="button" role="menuitem" data-click="new-dmn">New DMN</button>
+          <button type="button" role="menuitem" id="import-item">Import DMN…</button>
+          <button type="button" role="menuitem" data-click="export">Export DMN</button>
+        </div>
+        <input id="file" type="file" accept=".dmn,.xml" hidden />
+      </div>
+      <nav class="tabs">
+        <button data-click="tab:editor" aria-pressed="true">Editor</button>
+        <button data-click="tab:types" aria-pressed="false">Data types</button>
+      </nav>
+      <div class="toolbar">
+        <button class="icon" data-click="undo" disabled title="Undo (Ctrl/⌘ + Z)" aria-label="Undo">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 4 3.5 8l4 4M3.5 8h8a4.5 4.5 0 0 1 0 9H8" /></svg>
+        </button>
+        <button class="icon" data-click="redo" disabled title="Redo (Ctrl/⌘ + Shift + Z)" aria-label="Redo">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4 4 4-4 4M16.5 8h-8a4.5 4.5 0 0 0 0 9H12" /></svg>
+        </button>
+        <span class="sep"></span>
+        <button class="xmlbtn" data-click="xml-toggle" aria-pressed="false" title="Show the XML source">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M7 5.5 2.5 10 7 14.5M13 5.5l4.5 4.5-4.5 4.5M11.3 4 8.7 16" /></svg
+          >XML
+        </button>
+      </div>
+      <div class="menu" id="scn-menu">
+        <button
+          type="button"
+          id="scn-toggle"
+          aria-haspopup="menu"
+          aria-expanded="false"
+          aria-controls="scn-items"
+          title="Test scenarios: named sets of input values, kept outside the DMN file"
+        >
+          <span class="lbl">Scenario</span> <span id="scn-name">Scenario 1</span
+          ><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
+        </button>
+        <div id="scn-items" class="menu-items float" role="menu" hidden>
+          <div id="scn-list" role="group"></div>
+          <hr />
+          <button
+            type="button"
+            role="menuitem"
+            data-click="scn:new"
+            data-prompt="Name of the new scenario (it starts as a copy of this one)"
+          >
+            New scenario…
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-click="scn:rename"
+            data-prompt="Rename this scenario"
+            data-default="Scenario 1"
+          >
+            Rename…
+          </button>
+          <button type="button" role="menuitem" data-click="scn:delete" disabled>Delete</button>
+          <hr />
+          <button type="button" role="menuitem" data-click="scn:save" title="Download the scenarios as a JSON file">
+            Save scenarios
+          </button>
+          <button type="button" role="menuitem" id="scn-import-item" title="Load scenarios from a JSON file">
+            Load scenarios…
+          </button>
+        </div>
+        <input id="scn-file" type="file" accept=".json,application/json" hidden />
+      </div>
+      <button id="problems-btn" class="problems" data-level="ok" aria-expanded="false" aria-controls="problems-pop">
+        Problems
+      </button>
+      <span id="status">Starting Popcorn...</span>
+      <button id="theme" type="button"></button>
+    </header>
+
+    <div id="problems-pop" hidden role="dialog" aria-label="Problems">
+      <h4>Problems</h4>
+      <div id="problems-list"><p class="none">Nothing to fix.</p></div>
+    </div>
+
+    <main class="page">
+      <div class="work">
+        <div id="toast" role="status" hidden></div>
+        <div id="report" class="report"></div>
+
+        <section id="view-editor">
+          <div class="stage">
+            <div id="palette" class="float" role="toolbar" aria-label="Add elements">
+              <div
+                class="pal input"
+                draggable="true"
+                data-kind="input"
+                title="Input data: drag onto the canvas"
+                aria-label="Input data"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true"><rect x="1" y="1" width="40" height="26" rx="13" /></svg>
+              </div>
+              <div
+                class="pal decision"
+                draggable="true"
+                data-kind="decision"
+                title="Decision: drag onto the canvas"
+                aria-label="Decision"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true"><rect x="1" y="1" width="40" height="26" rx="3" /></svg>
+              </div>
+              <div
+                class="pal bkm"
+                draggable="true"
+                data-kind="bkm"
+                title="Business knowledge: drag onto the canvas"
+                aria-label="Business knowledge"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true">
+                  <polygon points="8,1 41,1 41,20 34,27 1,27 1,8" stroke-linejoin="round" />
+                </svg>
+              </div>
+              <div
+                class="pal source"
+                draggable="true"
+                data-kind="source"
+                title="Knowledge source: drag onto the canvas"
+                aria-label="Knowledge source"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true">
+                  <path d="M1 1H41V22C33 15 33 29 21 22S9 15 1 22Z" stroke-linejoin="round" />
+                </svg>
+              </div>
+              <div
+                class="pal group"
+                draggable="true"
+                data-kind="group"
+                title="Group: drag onto the canvas"
+                aria-label="Group"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true">
+                  <rect x="1" y="1" width="40" height="26" rx="5" stroke-dasharray="4 3" />
+                </svg>
+              </div>
+              <div
+                class="pal annotation"
+                draggable="true"
+                data-kind="annotation"
+                title="Text annotation: drag onto the canvas"
+                aria-label="Text annotation"
+              >
+                <svg viewBox="0 0 42 28" aria-hidden="true">
+                  <path d="M12 2H4V26H12" />
+                  <path d="M18 9H38M18 14H34M18 19H36" />
+                </svg>
+              </div>
+            </div>
+            <div class="zoomctl float">
+              <button data-click="zoom-in" title="Zoom in" aria-label="Zoom in">+</button
+              ><button data-click="zoom-out" title="Zoom out" aria-label="Zoom out">−</button
+              ><button data-click="fit" title="Fit diagram">Fit</button
+              ><button data-click="layout" title="Arrange nodes in layers">Auto-layout</button
+              ><button id="help-btn" title="How to use the canvas" aria-label="Help" aria-expanded="false">?</button>
+            </div>
+            <div id="help" class="float" hidden>
+              <h4>On the canvas</h4>
+              <ul>
+                <li><b>Add</b> an element: drag it from the palette</li>
+                <li><b>Connect</b>: hover a node and click or drag its blue arrow onto another node</li>
+                <li><b>Create and connect</b>: select a node and use the buttons beside it</li>
+                <li><b>Rename</b>: double-click a node, or press F2</li>
+                <li><b>Delete</b>: the × on a selected node, or the Delete key</li>
+                <li><b>Move around</b>: scroll to zoom, drag the background to pan</li>
+                <li><b>Undo / redo</b>: ⌘Z / ⇧⌘Z</li>
+              </ul>
+            </div>
+            <div id="empty" class="emptystate" hidden>
+              <div class="emptycard" role="region" aria-label="This diagram is empty">
+                <button class="icon close" data-click="empty-dismiss" title="Dismiss" aria-label="Dismiss">
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
+                </button>
+                <svg class="cursor" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3 19 11l-6 1.8L9.8 19z" /></svg>
+                <h2>This DMN's diagram is empty</h2>
+                <p>Start by dragging nodes from the palette</p>
+                <p class="or">or</p>
+                <div class="starters">
+                  <button class="starter" data-click="empty-add:table">
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <rect x="2" y="3" width="16" height="14" rx="2" />
+                      <path d="M2 8h16M8 8v9" /></svg
+                    >New decision table…
+                  </button>
+                  <button class="starter" data-click="empty-add:decision">
+                    <svg viewBox="0 0 30 22" aria-hidden="true">
+                      <rect class="decision" x="3" y="3" width="24" height="16" rx="3" /></svg
+                    >New decision…
+                  </button>
+                  <button class="starter" data-click="empty-add:input">
+                    <svg viewBox="0 0 30 22" aria-hidden="true">
+                      <rect class="input" x="3" y="3" width="24" height="16" rx="8" /></svg
+                    >New input data…
+                  </button>
+                </div>
+              </div>
+            </div>
+            <svg id="drd" viewBox="0 0 820 370" preserveAspectRatio="xMidYMin meet">
+              <defs>
+                <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+                  <circle cx="1" cy="1" r="1" />
+                </pattern>
+                <marker
+                  id="arrow-fill"
+                  viewBox="0 0 10 10"
+                  refX="10"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0 0L10 5L0 10z" />
+                </marker>
+                <marker id="dot" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7">
+                  <circle cx="5" cy="5" r="4" />
+                </marker>
+                <marker
+                  id="arrow-open"
+                  viewBox="0 0 10 10"
+                  refX="10"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0 0L10 5L0 10" fill="none" stroke-width="1.5" />
+                </marker>
+              </defs>
+              <rect id="grid" x="-50000" y="-50000" width="100000" height="100000" fill="url(#dots)" />
+              <g id="scene"></g>
+              <g id="preview"></g>
+            </svg>
+          </div>
+          <div id="dock" class="float">
+            <div
+              id="splitter"
+              role="separator"
+              aria-orientation="horizontal"
+              tabindex="0"
+              title="Drag to resize, double-click to enlarge"
+            ></div>
+            <div id="panel"></div>
+          </div>
+        </section>
+
+        <section id="view-types" hidden><div id="types"></div></section>
+      </div>
+
+      <aside id="xmlpane" aria-label="XML source">
+        <div
+          class="xresize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the XML panel"
+          tabindex="0"
+        ></div>
+        <div class="xmain">
+          <div class="xhead">
+            <b>XML</b><small id="xinfo"></small><span class="grow"></span>
+            <button class="icon" id="xwrap" aria-pressed="false" title="Word wrap" aria-label="Word wrap">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M3 5h14M3 10h11a2.5 2.5 0 0 1 0 5H11m0 0 2-2m-2 2 2 2M3 15h4" />
+              </svg>
+            </button>
+            <button class="icon" id="xcopy" title="Copy the XML" aria-label="Copy the XML">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <rect x="7" y="7" width="9" height="10" rx="1.5" />
+                <path d="M13 7V4.5A1.5 1.5 0 0 0 11.5 3h-6A1.5 1.5 0 0 0 4 4.5v8A1.5 1.5 0 0 0 5.5 14H7" />
+              </svg>
+            </button>
+            <button
+              class="icon"
+              id="xexpand"
+              aria-pressed="false"
+              title="Use the whole width"
+              aria-label="Use the whole width"
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M12 3h5v5M8 17H3v-5M17 3l-5.5 5.5M3 17l5.5-5.5" />
+              </svg>
+            </button>
+            <button class="icon" data-click="xml-toggle" title="Close" aria-label="Close the XML panel">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
+            </button>
+          </div>
+          <div class="xsearch">
+            <input
+              id="xsearch"
+              type="search"
+              placeholder="Find in the XML"
+              spellcheck="false"
+              aria-label="Find in the XML"
+            />
+            <span id="xcount" aria-live="polite"></span>
+            <button class="icon" id="xprev" title="Previous match" aria-label="Previous match">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 12 5-5 5 5" /></svg>
+            </button>
+            <button class="icon" id="xnext" title="Next match" aria-label="Next match">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5" /></svg>
+            </button>
+          </div>
+          <div id="xcode" tabindex="0" role="region" aria-label="XML source, read only"></div>
+        </div>
+      </aside>
+    </main>
+
+    <script>
+      // File menu: pure UI. Items keep their own handlers (the file input, data-click="export").
+      (() => {
+        const menu = document.querySelector("#file-menu"),
+          toggle = menu.querySelector("button"),
+          items = menu.querySelector("#file-items");
+        const set = (open) => {
+          items.hidden = !open;
+          toggle.setAttribute("aria-expanded", String(open));
+        };
+        toggle.addEventListener("click", () => set(items.hidden));
+        document.addEventListener("click", (e) => {
+          if (!menu.contains(e.target)) set(false);
+        });
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") set(false);
+        });
+        items.addEventListener("click", () => set(false));
+        menu.querySelector("#import-item").addEventListener("click", () => menu.querySelector("#file").click());
+      })();
+
+      // Scenario menu: pure UI too; the choices and actions are data-click handlers of the editor.
+      (() => {
+        const menu = document.querySelector("#scn-menu"),
+          toggle = menu.querySelector("#scn-toggle"),
+          items = menu.querySelector("#scn-items");
+        const set = (open) => {
+          items.hidden = !open;
+          toggle.setAttribute("aria-expanded", String(open));
+        };
+        toggle.addEventListener("click", () => set(items.hidden));
+        document.addEventListener("click", (e) => {
+          if (!menu.contains(e.target)) set(false);
+        });
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") set(false);
+        });
+        items.addEventListener("click", (e) => {
+          if (e.target.closest("button:not(:disabled)")) set(false);
+        });
+        menu.querySelector("#scn-import-item").addEventListener("click", () => menu.querySelector("#scn-file").click());
+      })();
+    </script>
+    <script>
+      // XML inspector: resize, expand, fold, find, wrap and copy. The code and the highlight of the selected
+      // element arrive from the editor (window.xmlPane.set / .select); clicks on the code go back to it.
+      (() => {
+        const $ = (s) => document.querySelector(s);
+        const page = $(".page"),
+          pane = $("#xmlpane"),
+          code = $("#xcode");
+        const store = {
+          get: (k) => {
+            try {
+              return localStorage.getItem(k);
+            } catch {
+              return null;
+            }
+          },
+          set: (k, v) => {
+            try {
+              localStorage.setItem(k, v);
+            } catch {}
+          },
+        };
+        let lines = [],
+          folds = new Map(),
+          folded = new Set(),
+          selected = null,
+          matches = [],
+          cur = -1;
+
+        // width: remembered as a share of the page, so it survives a window resize
+        const w0 = store.get("xml.w");
+        if (w0) pane.style.setProperty("--xw", w0);
+        const setW = (px) => {
+          const total = page.getBoundingClientRect().width;
+          const w = Math.min(Math.max(px, 320), total - 320);
+          pane.style.setProperty("--xw", Math.round((w / total) * 1000) / 10 + "%");
+        };
+        const grip = $(".xresize");
+        grip.addEventListener("pointerdown", (e) => {
+          grip.setPointerCapture(e.pointerId);
+          grip.classList.add("drag");
+          pane.classList.add("resizing");
+        });
+        grip.addEventListener("pointermove", (e) => {
+          if (grip.classList.contains("drag")) setW(page.getBoundingClientRect().right - e.clientX);
+        });
+        grip.addEventListener("pointerup", () => {
+          grip.classList.remove("drag");
+          pane.classList.remove("resizing");
+          store.set("xml.w", pane.style.getPropertyValue("--xw"));
+        });
+        grip.addEventListener("keydown", (e) => {
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+          e.preventDefault();
+          setW(pane.getBoundingClientRect().width + (e.key === "ArrowLeft" ? 32 : -32));
+          store.set("xml.w", pane.style.getPropertyValue("--xw"));
+        });
+
+        $("#xexpand").addEventListener("click", (e) => {
+          const on = page.classList.toggle("xexp");
+          e.currentTarget.setAttribute("aria-pressed", String(on));
+        });
+        const wrap = (on) => {
+          code.classList.toggle("wrap", on);
+          $("#xwrap").setAttribute("aria-pressed", String(on));
+        };
+        wrap(store.get("xml.wrap") === "1");
+        $("#xwrap").addEventListener("click", () => {
+          const on = !code.classList.contains("wrap");
+          wrap(on);
+          store.set("xml.wrap", on ? "1" : "0");
+        });
+
+        // copy the whole document: the text of every line, as written
+        $("#xcopy").addEventListener("click", async (e) => {
+          const b = e.currentTarget; // gone once the clipboard promise has been awaited
+          const text = [...code.querySelectorAll(".xc")].map((c) => c.textContent).join("\n") + "\n";
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch {
+            const t = Object.assign(document.createElement("textarea"), { value: text });
+            document.body.appendChild(t);
+            t.select();
+            document.execCommand("copy");
+            t.remove();
+          }
+          b.dataset.done = "1";
+          b.title = "Copied";
+          setTimeout(() => {
+            delete b.dataset.done;
+            b.title = "Copy the XML";
+          }, 1400);
+        });
+
+        // folding: an element is hidden by hiding the lines after its first one
+        const applyFolds = () => {
+          for (const l of lines) l.hidden = false;
+          for (const from of [...folded].sort((a, b) => a - b)) {
+            const to = folds.get(from);
+            for (let n = from + 1; n <= to; n++) lines[n - 1].hidden = true;
+          }
+          for (const g of code.querySelectorAll(".xg[data-to]")) {
+            const n = +g.closest(".xl").dataset.n,
+              closed = folded.has(n);
+            g.classList.toggle("folded", closed);
+            g.setAttribute("aria-expanded", String(!closed));
+            g.setAttribute("aria-label", `${closed ? "Unfold" : "Fold"} lines ${n} to ${g.dataset.to}`);
+            g.title = closed ? "Unfold" : "Fold";
+          }
+        };
+        code.addEventListener("click", (e) => {
+          const g = e.target.closest(".xg[data-to]");
+          if (!g) return;
+          const n = +g.closest(".xl").dataset.n;
+          if (!folded.delete(n)) folded.add(n);
+          applyFolds();
+        });
+        // make a line visible by opening the elements that contain it
+        const reveal = (n) => {
+          let changed = false;
+          for (const f of [...folded])
+            if (f < n && folds.get(f) >= n) {
+              folded.delete(f);
+              changed = true;
+            }
+          if (changed) applyFolds();
+        };
+        const scrollTo = (n) => {
+          const r = lines[n - 1].getBoundingClientRect(),
+            c = code.getBoundingClientRect();
+          code.scrollTop += r.top - c.top - code.clientHeight * 0.18;
+        };
+
+        // find: every match is a Range in the CSS highlight registry, so the DOM is not touched
+        const count = $("#xcount");
+        const search = (keep) => {
+          const q = $("#xsearch").value.toLowerCase();
+          matches = [];
+          cur = -1;
+          CSS.highlights?.delete("xmatch");
+          CSS.highlights?.delete("xcur");
+          if (q) {
+            for (const c of code.querySelectorAll(".xc")) {
+              const t = c.textContent.toLowerCase();
+              for (let i = t.indexOf(q); i !== -1 && matches.length < 2000; i = t.indexOf(q, i + q.length))
+                matches.push({ c, i, len: q.length });
+            }
+            CSS.highlights?.set("xmatch", new Highlight(...matches.map(range)));
+          }
+          count.textContent = q
+            ? matches.length
+              ? `${matches.length}${matches.length === 2000 ? "+" : ""}`
+              : "none"
+            : "";
+          if (keep && matches.length) go(1);
+        };
+        const range = ({ c, i, len }) => {
+          const r = document.createRange(),
+            w = document.createTreeWalker(c, NodeFilter.SHOW_TEXT);
+          let at = 0,
+            start = false;
+          for (let n = w.nextNode(); n; n = w.nextNode()) {
+            const end = at + n.length;
+            if (!start && i < end) {
+              r.setStart(n, i - at);
+              start = true;
+            }
+            if (start && i + len <= end) {
+              r.setEnd(n, i + len - at);
+              break;
+            }
+            at = end;
+          }
+          return r;
+        };
+        const go = (d) => {
+          if (!matches.length) return;
+          cur = (cur + d + matches.length) % matches.length;
+          const m = matches[cur],
+            n = +m.c.closest(".xl").dataset.n;
+          reveal(n);
+          scrollTo(n);
+          CSS.highlights?.set("xcur", new Highlight(range(m)));
+          count.textContent = `${cur + 1} / ${matches.length}`;
+        };
+        $("#xsearch").addEventListener("input", () => search(true));
+        $("#xsearch").addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            go(e.shiftKey ? -1 : 1);
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.target.value = "";
+            search(false);
+            code.focus();
+          }
+        });
+        $("#xnext").addEventListener("click", () => go(1));
+        $("#xprev").addEventListener("click", () => go(-1));
+        pane.addEventListener("keydown", (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+            e.preventDefault();
+            $("#xsearch").focus();
+            $("#xsearch").select();
+          }
+        });
+
+        const mark = () => {
+          for (const l of code.querySelectorAll(".xhl")) l.classList.remove("xhl", "xhl-first");
+          if (!selected) return;
+          for (let n = selected[0]; n <= selected[1]; n++) lines[n - 1]?.classList.add("xhl");
+          lines[selected[0] - 1]?.classList.add("xhl-first");
+        };
+
+        window.xmlPane = {
+          // a new document: keep where the user was reading, the folds that still exist and the search
+          set(html, info) {
+            const top = code.scrollTop;
+            code.innerHTML = html;
+            lines = [...code.querySelectorAll(".xl")];
+            folds = new Map(
+              [...code.querySelectorAll(".xg[data-to]")].map((g) => [+g.closest(".xl").dataset.n, +g.dataset.to])
+            );
+            folded = new Set([...folded].filter((n) => folds.has(n)));
+            applyFolds();
+            mark();
+            code.scrollTop = top;
+            $("#xinfo").textContent = info;
+            if ($("#xsearch").value) search(false);
+          },
+          // highlight lines from..to (0 clears); only a selection that came from another view scrolls to it
+          select(from, to, scroll) {
+            selected = from ? [from, to] : null;
+            if (selected) reveal(from);
+            mark();
+            if (selected && scroll) scrollTo(from);
+          },
+        };
+      })();
+    </script>
+    <script>
+      // chrome that needs no model: the dock's height and the help popover
+      (() => {
+        const root = document.documentElement;
+        const split = document.getElementById("splitter");
+        const dock = document.getElementById("dock");
+        const ws = document.getElementById("view-editor");
+        const KEY = "dmn-dock-height";
+        try {
+          const saved = localStorage.getItem(KEY);
+          if (saved) root.style.setProperty("--dock-h", saved);
+        } catch (e) {}
+        const set = (px) => {
+          const h = Math.max(140, Math.min(px, ws.clientHeight - 120));
+          root.style.setProperty("--dock-h", h + "px");
+          try {
+            localStorage.setItem(KEY, h + "px");
+          } catch (e) {}
+        };
+        split.addEventListener("pointerdown", (e) => {
+          split.setPointerCapture(e.pointerId);
+          split.classList.add("drag");
+          dock.classList.add("resizing");
+          const move = (ev) => set(ws.getBoundingClientRect().bottom - 12 - ev.clientY);
+          const up = () => {
+            split.classList.remove("drag");
+            dock.classList.remove("resizing");
+            split.removeEventListener("pointermove", move);
+            split.removeEventListener("pointerup", up);
+          };
+          split.addEventListener("pointermove", move);
+          split.addEventListener("pointerup", up);
+        });
+        split.addEventListener("dblclick", () => {
+          const h = dock.getBoundingClientRect().height;
+          set(h > ws.clientHeight * 0.6 ? ws.clientHeight * 0.4 : ws.clientHeight * 0.75);
+        });
+        split.addEventListener("keydown", (e) => {
+          const h = dock.getBoundingClientRect().height;
+          if (e.key === "ArrowUp") set(h + 32);
+          if (e.key === "ArrowDown") set(h - 32);
+        });
+        const pop = document.getElementById("problems-pop");
+        const pbtn = document.getElementById("problems-btn");
+        const setPop = (open) => {
+          pop.hidden = !open;
+          pbtn.setAttribute("aria-expanded", String(open));
+        };
+        pbtn.addEventListener("click", () => setPop(pop.hidden));
+        pop.addEventListener("click", (e) => {
+          if (e.target.closest(".problem")) setPop(false);
+        });
+        document.addEventListener("click", (e) => {
+          if (!pop.hidden && !e.target.closest("#problems-pop, #problems-btn")) setPop(false);
+        });
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") setPop(false);
+        });
+        // everything lives in this page: leaving it with changes that were not exported or saved asks first
+        window.addEventListener("beforeunload", (e) => {
+          if (document.body.dataset.unsaved === "true") {
+            e.preventDefault();
+            e.returnValue = "";
+          }
+        });
+        const help = document.getElementById("help");
+        const btn = document.getElementById("help-btn");
+        const show = (on) => {
+          help.hidden = !on;
+          btn.setAttribute("aria-expanded", String(on));
+        };
+        btn.addEventListener("click", () => show(help.hidden));
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") show(false);
+        });
+      })();
+    </script>
+    <script type="module">
+      import { Popcorn } from "./out/index.mjs";
+      const t0 = performance.now();
+      // Popcorn needs SharedArrayBuffer, which browsers only provide to cross-origin isolated pages. When this page
+      // is embedded or served without the right headers, say so instead of hanging on "Starting Popcorn...".
+      if (!self.crossOriginIsolated) {
+        document.querySelector("#status").textContent = "Cannot start: this page is not cross-origin isolated.";
+        document.querySelector("#report").innerHTML =
+          "<b>This editor cannot run here.</b> It needs a cross-origin isolated page: serve it with " +
+          "<code>Cross-Origin-Opener-Policy: same-origin</code> and <code>Cross-Origin-Embedder-Policy: require-corp</code> " +
+          "(or <code>credentialless</code>). When embedded in an iframe the host page needs the same headers and the iframe " +
+          '<code>allow="cross-origin-isolated"</code>. See <code>EMBEDDING.md</code>.';
+        document.documentElement.dataset.popcorn = "unsupported";
+      } else {
+        try {
+          // Embedded in a page of the same origin (see EMBEDDING.md), the editor tells it what happens and takes
+          // its documents: the editor's messages (ready, loaded, dirty, xml, error) go up as
+          // {source: "dmn-editor", t, ...}, and the page's go down as {target: "dmn-editor", type, ...}:
+          // load {name, xml, externalTypes: [{importName, xml}]}, get_xml {id}, saved.
+          const host = window.parent !== window ? window.parent : null;
+          const booting = Popcorn.init({
+            onStdout: console.log,
+            onStderr: console.error,
+            onEvent: (m) => host && host.postMessage({ source: "dmn-editor", ...m }, location.origin),
+            timeoutsMs: { boot: 120000, appStartup: 120000 },
+          });
+          // Popcorn 0.4.0-next.9 traps when one JS->BEAM message is larger than 64 KiB: text goes in chunks
+          const sendText = async (popcorn, kind, name, text) => {
+            const parts = [],
+              size = 16 * 1024;
+            for (let i = 0; i < text.length; ) {
+              let end = Math.min(i + size, text.length);
+              const c = text.charCodeAt(end - 1);
+              if (end < text.length && c >= 0xd800 && c <= 0xdbff) end--; // never split a surrogate pair
+              parts.push(text.slice(i, end));
+              i = end;
+            }
+            if (parts.length === 0) parts.push("");
+            for (const [i, part] of parts.entries())
+              await popcorn.send("editor", { t: "import_chunk", kind, name, i, n: parts.length, text: part });
+          };
+          window.addEventListener("message", async (e) => {
+            const m = e.data;
+            if (!host || e.source !== host || e.origin !== location.origin || !m || m.target !== "dmn-editor") return;
+            const popcorn = await booting;
+            if (m.type === "load") {
+              for (const t of m.externalTypes || []) await sendText(popcorn, "host_types", t.importName, t.xml);
+              await sendText(popcorn, "host", m.name, m.xml);
+            } else if (m.type === "get_xml") await popcorn.send("editor", { t: "host_get_xml", id: m.id });
+            else if (m.type === "saved") await popcorn.send("editor", { t: "host_saved" });
+          });
+          await booting;
+          console.log(`popcorn booted in ${Math.round(performance.now() - t0)} ms`);
+          document.documentElement.dataset.popcorn = "booted";
+        } catch (e) {
+          document.querySelector("#status").textContent = "Popcorn failed: " + (e && (e.message || JSON.stringify(e)));
+          document.documentElement.dataset.popcorn = "failed";
+        }
+      }
+    </script>
+  </body>
+</html>
