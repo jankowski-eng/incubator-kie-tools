@@ -2090,6 +2090,87 @@ defmodule DmnSpikeTest do
     end
   end
 
+  describe "evaluation edge cases (cycles, function building, comments)" do
+    alias DmnSpike.{Dmn, Problems}
+
+    @cyc """
+    <definitions xmlns="https://www.omg.org/spec/DMN/20240513/MODEL/" name="c" id="d">
+      <decision id="a" name="A"><variable id="va" name="A"/>
+        <informationRequirement id="r1"><requiredDecision href="#b"/></informationRequirement>
+        <literalExpression><text>B + 1</text></literalExpression></decision>
+      <decision id="b" name="B"><variable id="vb" name="B"/>
+        <informationRequirement id="r2"><requiredDecision href="#a"/></informationRequirement>
+        <literalExpression><text>A + 1</text></literalExpression></decision>
+      <decision id="c" name="C"><variable id="vc" name="C"/>
+        <informationRequirement id="r3"><requiredDecision href="#a"/></informationRequirement>
+        <literalExpression><text>if A = null then "nothing" else "something"</text></literalExpression></decision>
+      <decision id="s" name="S"><variable id="vs" name="S"/>
+        <informationRequirement id="r4"><requiredDecision href="#s"/></informationRequirement>
+        <literalExpression><text>1</text></literalExpression></decision>
+      <decision id="ok" name="Fine"><variable id="vo" name="Fine"/><literalExpression><text>41 + 1</text></literalExpression></decision>
+    </definitions>
+    """
+
+    test "nodes in a cycle are not evaluated, and what depends on them sees null, wherever evaluation starts" do
+      {:ok, m, _} = Dmn.from_xml(@cyc)
+      r = Eval.run(m)
+
+      for id <- ["a", "b", "s"] do
+        assert r[id].cycle == true and r[id].value == nil, id
+        assert [msg] = r[id].errors
+        assert msg =~ "dependency cycle"
+      end
+
+      assert r["c"].value == "nothing", "a dependent of a cycle node sees null, not a half-evaluated value"
+      assert r["ok"].value |> Decimal.equal?(42), "the rest is evaluated"
+      refute Map.has_key?(r["ok"], :cycle)
+
+      # the same result for every order the nodes could be visited in
+      for _ <- 1..6 do
+        shuffled = %{m | nodes: m.nodes |> Enum.shuffle() |> Map.new()}
+
+        assert Eval.run(shuffled) |> Map.new(fn {k, v} -> {k, {v.value, v.errors}} end) ==
+                 Map.new(r, fn {k, v} -> {k, {v.value, v.errors}} end)
+      end
+    end
+
+    test "the Problems list names the cycle in plain words" do
+      {:ok, m, _} = Dmn.from_xml(@cyc)
+      found = Problems.list(m, Eval.run(m)) |> Enum.filter(&(&1.target in [{:node, "a"}, {:node, "s"}]))
+      assert Enum.any?(found, &(&1.severity == :error and &1.message =~ "part of a dependency cycle"))
+      refute Enum.any?(found, &(&1.message =~ "does not fit its type")), inspect(found)
+    end
+
+    test "a business knowledge model that cannot be built into a function says why" do
+      m = Model.sample()
+      m = Model.set_params(m, "dti", "x)")
+      r = Eval.run(m)["dti"]
+      assert r.value == nil
+      assert [msg] = r.errors
+      assert msg =~ "cannot build the function"
+
+      assert [%{severity: :error, message: pm}] =
+               Problems.list(m, Eval.run(m)) |> Enum.filter(&(&1.target == {:node, "dti"}))
+
+      assert pm =~ "cannot build the function" and not (pm =~ "does not fit")
+    end
+
+    test "a line comment in a business knowledge model's rows or result does not break the function" do
+      m = Model.sample()
+      m = Model.set_params(m, "dti", "a")
+      m = Model.set_text(m, "dti", 0, "36 // the limit")
+      assert Eval.run(m)["dti"].errors == []
+      assert %Feel.Value.Function{} = Eval.run(m)["dti"].value
+
+      # rows and a result, each ending in a comment
+      m = put_in(m.nodes["dti"].expr, %{rows: [%{name: "x", text: "1 // one"}], result: "x + a // sum", params: ["a"]})
+      r = Eval.run(m)["dti"]
+      assert r.errors == [], inspect(r.errors)
+      assert {:ok, v, _} = Feel.eval("f(2)", %{"f" => r.value}, sandbox: false)
+      assert Decimal.equal?(v, 3)
+    end
+  end
+
   describe "descriptions" do
     alias DmnSpike.Dmn
 

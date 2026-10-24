@@ -5,20 +5,96 @@ defmodule DmnSpike.Eval do
 
   @doc "Returns `%{node_id => %{value: term, cells: [result]}}`."
   def run(%Model{} = m) do
-    Enum.reduce(Map.keys(m.nodes), %{}, fn id, acc -> visit(m, id, acc, []) end)
+    cyc = cyclic(m)
+    Enum.reduce(Map.keys(m.nodes), %{}, fn id, acc -> visit(m, cyc, id, acc, []) end)
   end
 
-  defp visit(m, id, acc, stack) do
+  # Nodes that take part in a cycle of requirements (an imported file can have them; the editor refuses to
+  # make one). They are not evaluated: with one of its inputs missing, a value would depend on where the
+  # evaluation happened to start. Tarjan's algorithm over "requires".
+  defp cyclic(m) do
+    deps = Enum.group_by(m.edges, fn {_, to, _} -> to end, fn {from, _, _} -> from end)
+    st = %{i: 0, idx: %{}, low: %{}, stack: [], on: MapSet.new(), cyc: MapSet.new()}
+
+    m.nodes
+    |> Map.keys()
+    |> Enum.reduce(st, fn v, st -> if Map.has_key?(st.idx, v), do: st, else: strong(v, deps, st) end)
+    |> Map.fetch!(:cyc)
+  end
+
+  defp strong(v, deps, st) do
+    st = %{
+      st
+      | idx: Map.put(st.idx, v, st.i),
+        low: Map.put(st.low, v, st.i),
+        i: st.i + 1,
+        stack: [v | st.stack],
+        on: MapSet.put(st.on, v)
+    }
+
+    st =
+      Enum.reduce(Map.get(deps, v, []), st, fn w, st ->
+        cond do
+          not Map.has_key?(st.idx, w) ->
+            st = strong(w, deps, st)
+            %{st | low: Map.put(st.low, v, min(st.low[v], st.low[w]))}
+
+          MapSet.member?(st.on, w) ->
+            %{st | low: Map.put(st.low, v, min(st.low[v], st.idx[w]))}
+
+          true ->
+            st
+        end
+      end)
+
+    if st.low[v] == st.idx[v] do
+      {scc, rest} = pop(st.stack, v, [])
+
+      cyc =
+        if length(scc) > 1 or v in Map.get(deps, v, []), do: Enum.reduce(scc, st.cyc, &MapSet.put(&2, &1)), else: st.cyc
+
+      %{st | stack: rest, on: Enum.reduce(scc, st.on, &MapSet.delete(&2, &1)), cyc: cyc}
+    else
+      st
+    end
+  end
+
+  defp pop([v | rest], v, acc), do: {[v | acc], rest}
+  defp pop([w | rest], v, acc), do: pop(rest, v, [w | acc])
+
+  defp cycle_result(node) do
+    base = %{
+      value: nil,
+      cells: Enum.map(Model.cells(node), fn _ -> {:ok, nil, []} end),
+      cycle: true,
+      errors: ["part of a dependency cycle, so it is not evaluated"]
+    }
+
+    if match?(%{kind: :table}, node.expr),
+      do:
+        Map.put(base, :table, %{
+          matched: Enum.map(node.expr.rules, fn _ -> false end),
+          chosen: [],
+          errors: %{},
+          message: nil
+        }),
+      else: base
+  end
+
+  defp visit(m, cyc, id, acc, stack) do
     cond do
       Map.has_key?(acc, id) ->
         acc
+
+      MapSet.member?(cyc, id) ->
+        Map.put(acc, id, cycle_result(m.nodes[id]))
 
       id in stack ->
         acc
 
       true ->
         deps = for {from, ^id, _} <- m.edges, do: from
-        acc = Enum.reduce(deps, acc, &visit(m, &1, &2, [id | stack]))
+        acc = Enum.reduce(deps, acc, &visit(m, cyc, &1, &2, [id | stack]))
 
         env =
           for d <- deps, Map.has_key?(acc, d), into: %{}, do: {m.nodes[d].name, acc[d].value}
@@ -28,7 +104,7 @@ defmodule DmnSpike.Eval do
         errors =
           if m.nodes[id].type == :bkm, do: [], else: DmnSpike.Types.validate(m, node_result.value, m.nodes[id].type_ref)
 
-        # a decision table's columns have types of their own
+        # a decision table's columns have types of their own, a business knowledge model may fail to build
         errors = errors ++ Map.get(node_result, :column_errors, [])
         Map.put(acc, id, node_result |> Map.delete(:column_errors) |> Map.put(:errors, errors))
     end
@@ -44,13 +120,14 @@ defmodule DmnSpike.Eval do
     # cells are checked with the parameters bound to null, the node's value is the function
     cells = eval_node(%{node | type: :decision}, Enum.reduce(params, env, &Map.put(&2, &1, nil)), m).cells
 
-    fun =
+    # a parameter list or body that cannot be built into a function is said so, not turned into a null
+    {fun, errors} =
       case Feel.eval("function(" <> Enum.join(params, ", ") <> ") " <> body_text(node), env, sandbox: false) do
-        {:ok, f, _} -> f
-        _ -> nil
+        {:ok, f, _} -> {f, []}
+        {:error, e} -> {nil, ["cannot build the function: " <> Exception.message(e)]}
       end
 
-    %{value: fun, cells: cells}
+    %{value: fun, cells: cells, column_errors: errors}
   end
 
   defp eval_node(node, env, _m) do
@@ -186,8 +263,10 @@ defmodule DmnSpike.Eval do
   defp body_text(%{expr: %{rows: [], result: result}}), do: blank_null(result)
 
   defp body_text(%{expr: %{rows: rows, result: result}}) do
-    entries = Enum.map_join(rows, ", ", &"#{&1.name}: #{blank_null(&1.text)}")
-    if String.trim(result) == "", do: "{#{entries}}", else: "{#{entries}, __result: #{result}}.__result"
+    # every embedded expression ends with a newline, so that a trailing `// comment` cannot swallow the
+    # syntax that is put around it
+    entries = Enum.map_join(rows, ",", &"#{&1.name}: #{blank_null(&1.text)}\n")
+    if String.trim(result) == "", do: "{#{entries}}", else: "{#{entries}, __result: #{result}\n}.__result"
   end
 
   defp blank_null(text), do: if(String.trim(text) == "", do: "null", else: text)

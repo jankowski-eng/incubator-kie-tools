@@ -29,9 +29,15 @@ defmodule DmnSpike.Problems do
     mk = fn severity, message -> %{severity: severity, target: target, title: node.name, message: message} end
 
     cell_problems(node, result, mk, MapSet.member?(ctx.null_inputs, node.id)) ++
-      for(e <- (result && result.errors) || [], do: mk.(:error, "value does not fit its type: " <> e)) ++
+      for(e <- (result && result.errors) || [], do: mk.(:error, error_text(e))) ++
       table_problems(node, result, mk) ++ empty_problems(node, mk) ++ isolated_problems(ctx, node, mk)
   end
+
+  # errors from the evaluation are about types, except these, which say what is wrong in their own words
+  @plain ["part of a dependency cycle", "cannot build the function"]
+
+  defp error_text(e),
+    do: if(String.starts_with?(e, @plain), do: e, else: "value does not fit its type: " <> e)
 
   # `ctx.null_inputs`: nodes with an upstream value that is null or failed. An operand that is null because
   # something it needs is null is the symptom, not the problem, so those warnings are left out for them.
